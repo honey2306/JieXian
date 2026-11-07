@@ -1,0 +1,81 @@
+name: Signed Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Prepare release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          echo "$KEYSTORE_BASE64" | base64 -d \
+            > "$RUNNER_TEMP/jiexian-release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/jiexian-release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+      - name: Build and verify signed APK
+        env:
+          VERSION_NAME: ${{ github.ref_name }}
+        run: |
+          export VERSION_NAME="${VERSION_NAME#v}"
+          export VERSION_CODE=$(($(date +%y)*1000000 \
+            + $(date +%m)*10000 + $(date +%d)*100 \
+            + ${{ github.run_number }}))
+          echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          ./gradlew --no-daemon :app:assembleRelease \
+            :app:testDebugUnitTest :app:lintRelease
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify \
+            --print-certs app/build/outputs/apk/release/app-release.apk
+      - name: Package update manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          code = os.environ['VERSION_CODE']
+          name = os.environ['VERSION_NAME']
+          tag = os.environ['GITHUB_REF_NAME']
+          apk = pathlib.Path('app/build/outputs/apk/release/app-release.apk')
+          output = pathlib.Path(f'JieXian-{name}.apk')
+          output.write_bytes(apk.read_bytes())
+          release = {
+              'versionCode': int(code),
+              'versionName': name,
+              'notes': f'界限 {name}：最新功能与稳定性改进。',
+              'apkUrl': (
+                  'https://github.com/honey2306/JieXian/releases/'
+                  f'download/{tag}/{output.name}'
+              ),
+              'sha256': hashlib.sha256(output.read_bytes()).hexdigest(),
+              'sizeBytes': output.stat().st_size,
+          }
+          pathlib.Path('update.json').write_text(json.dumps(release,ensure_ascii=False,indent=2)+'\n')
+          PY
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            "JieXian-${VERSION_NAME}.apk" update.json \
+            --title "界限 ${VERSION_NAME}" --generate-notes --latest

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#e9ebe5">
+  <title>界限 · 首页与规则设置方向稿</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="review-header">
+    <div class="review-brand">
+      <span class="review-logo" aria-hidden="true"></span>
+      <div>
+        <strong>界限</strong>
+        <span>JIEXIAN / UI DIRECTIONS</span>
+      </div>
+    </div>
+    <div class="direction-switch" role="tablist" aria-label="设计方向">
+      <button class="direction-button active" data-direction="a" role="tab" aria-selected="true"><span>A</span>晨雾</button>
+      <button class="direction-button" data-direction="b" role="tab" aria-selected="false"><span>B</span>静夜</button>
+      <button class="direction-button" data-direction="c" role="tab" aria-selected="false"><span>C</span>秩序</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="review-intro">
+      <p class="eyebrow">首页 × 规则设置 · 高保真方向稿</p>
+      <h1 id="direction-title">晨雾，给专注留白。</h1>
+      <p id="direction-description">浅色、呼吸感与柔和刻度。保留安静的氛围，也让每次设置都轻松直接。</p>
+    </section>
+
+    <section class="device-pair" id="device-pair" aria-live="polite"></section>
+
+    <div class="review-note">
+      <span class="note-dot"></span>
+      <span>仅用于视觉与交互方向确认，尚未应用到 Android。点击「每日限额 / 禁用时段」可查看两种设置状态。</span>
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
