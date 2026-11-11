@@ -19,7 +19,14 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.jiexian.app.MainActivity
 import com.jiexian.app.R
+import com.jiexian.app.data.RuleRepository
+import com.jiexian.app.data.UsageRepository
 import com.jiexian.app.util.PermissionUtils
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 /**
  * Keeps the guardian process alive.
@@ -32,11 +39,40 @@ import com.jiexian.app.util.PermissionUtils
 class GuardService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val manager by lazy { NotificationManagerCompat.from(this) }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val overlayGuard by lazy {
+        val repository = RuleRepository.get(this)
+        val usage = UsageRepository(this)
+        OverlayGuard(
+            context = this,
+            repository = repository,
+            usageRepository = usage,
+            snapshotter = LockSnapshotter(repository, usage),
+        )
+    }
+
+    private val overlayPulse =
+        object : Runnable {
+            override fun run() {
+                // Runs only while a fallback is possible; the accessibility path blocks faster.
+                if (!PermissionUtils.isAccessibilityEnabledInSettings(this@GuardService) &&
+                    PermissionUtils.canDrawOverlays(this@GuardService)
+                ) {
+                    val accessibilityRunning = ProtectionState.serviceRunning.value
+                    scope.launch {
+                        runCatching { overlayGuard.tick(accessibilityRunning = accessibilityRunning) }
+                    }
+                } else {
+                    overlayGuard.hide()
+                }
+                handler.postDelayed(this, OVERLAY_INTERVAL_MILLIS)
+            }
+        }
 
     private val statusPulse =
         object : Runnable {
             override fun run() {
-                if (!PermissionUtils.isAccessibilityEnabledInSettings(this@GuardService)) {
+                if (!guardPossible()) {
                     stopSelf()
                     return
                 }
@@ -58,13 +94,15 @@ class GuardService : Service() {
         startId: Int,
     ): Int {
         startInForeground()
-        if (!PermissionUtils.isAccessibilityEnabledInSettings(this)) {
+        if (!guardPossible()) {
             stopSelf()
             return START_NOT_STICKY
         }
         GuardianScheduler.ensureWatchdog(this)
         handler.removeCallbacks(statusPulse)
         handler.post(statusPulse)
+        handler.removeCallbacks(overlayPulse)
+        handler.post(overlayPulse)
         return START_STICKY
     }
 
@@ -79,6 +117,8 @@ class GuardService : Service() {
     override fun onDestroy() {
         running = false
         handler.removeCallbacksAndMessages(null)
+        overlayGuard.hide()
+        scope.cancel()
         GuardianLog.record(this, "常驻守护停止")
         super.onDestroy()
     }
@@ -107,12 +147,16 @@ class GuardService : Service() {
             .setSmallIcon(R.drawable.ic_stat_guard)
             .setColor(MOONLIGHT)
             .setContentTitle(
-                if (alive()) "界限 · 守护运行中" else "界限 · 守护已停止",
+                when {
+                    accessibleAlive() -> "界限 · 守护运行中"
+                    PermissionUtils.canDrawOverlays(this) -> "界限 · 悬浮窗拦截中"
+                    else -> "界限 · 守护已停止"
+                },
             ).setContentText(
-                if (alive()) {
-                    "应用切换时检查额度与时段，退出多任务也不会中断"
-                } else {
-                    "无障碍服务被系统停止，点此重新开启"
+                when {
+                    accessibleAlive() -> "应用切换时检查额度与时段，退出多任务也不会中断"
+                    PermissionUtils.canDrawOverlays(this) -> "无障碍被系统停止，正在用悬浮窗继续拦截"
+                    else -> "无障碍服务被系统停止，点此重新开启"
                 },
             ).setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -123,10 +167,16 @@ class GuardService : Service() {
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setContentIntent(openAppIntent())
             .apply {
-                if (!alive()) addAction(0, "重新开启", accessibilitySettingsIntent())
+                if (!accessibleAlive()) addAction(0, "重新开启", accessibilitySettingsIntent())
             }.build()
 
-    private fun alive(): Boolean = GuardianHeartbeat.isAlive(this)
+    /** The guard can do something with accessibility, or at least with the overlay fallback. */
+    private fun guardPossible(): Boolean =
+        PermissionUtils.isAccessibilityEnabledInSettings(this) || PermissionUtils.canDrawOverlays(this)
+
+    private fun accessibleAlive(): Boolean = GuardianHeartbeat.isAlive(this)
+
+    private fun alive(): Boolean = accessibleAlive() || PermissionUtils.canDrawOverlays(this)
 
     private fun openAppIntent(): PendingIntent =
         PendingIntent.getActivity(
@@ -159,6 +209,7 @@ class GuardService : Service() {
         private const val CHANNEL_ID = "guardian_status"
         private const val NOTIFICATION_ID = 4201
         private const val STATUS_INTERVAL_MILLIS = 30_000L
+        private const val OVERLAY_INTERVAL_MILLIS = 1_500L
         private const val MOONLIGHT = 0xFFDAE7CC.toInt()
 
         @Volatile

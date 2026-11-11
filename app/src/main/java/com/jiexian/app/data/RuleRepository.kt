@@ -27,8 +27,6 @@ class RuleRepository private constructor(
 
     suspend fun allowOnlyRules(): List<AppRule> = dao.allRules().filter { it.type == RuleType.ALLOW_ONLY }
 
-    suspend fun locksNow(now: Long): List<ActiveLock> = dao.locksNow(now)
-
     suspend fun activeLocksForPackage(
         packageName: String,
         now: Long,

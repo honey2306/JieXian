@@ -14,6 +14,19 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
 
+enum class ActivityChangeKind {
+    RESUMED,
+    PAUSED,
+    SCREEN_OFF,
+}
+
+/** Minimal activity state change used by the overlay fallback while accessibility is gone. */
+data class ActivityChange(
+    val packageName: String,
+    val activityClass: String?,
+    val kind: ActivityChangeKind,
+)
+
 data class ForegroundResume(
     val packageName: String,
     val atMillis: Long,
@@ -89,6 +102,37 @@ class UsageRepository(
                     .toEpochMilli()
             val now = System.currentTimeMillis()
             usageSince(dayStart, now).filterKeys { it in packageNames }
+        }
+
+    /**
+     * Raw activity transitions between [fromMillis] and now.
+     *
+     * The overlay fallback follows the foreground package itself, because usage totals cannot
+     * tell whether an app is on screen right now.
+     */
+    suspend fun activityChanges(
+        fromMillis: Long,
+        toMillis: Long = System.currentTimeMillis(),
+    ): List<ActivityChange> =
+        withContext(Dispatchers.IO) {
+            if (!hasUsageAccess()) return@withContext emptyList()
+            val events =
+                runCatching { usageStatsManager.queryEvents(fromMillis, toMillis + 1_000L) }.getOrNull()
+                    ?: return@withContext emptyList()
+            val event = UsageEvents.Event()
+            val changes = mutableListOf<ActivityChange>()
+            while (events.getNextEvent(event)) {
+                when (event.eventType) {
+                    UsageEvents.Event.MOVE_TO_FOREGROUND ->
+                        changes += ActivityChange(event.packageName.orEmpty(), event.className, ActivityChangeKind.RESUMED)
+                    UsageEvents.Event.MOVE_TO_BACKGROUND,
+                    EVENT_ACTIVITY_STOPPED,
+                    -> changes += ActivityChange(event.packageName.orEmpty(), event.className, ActivityChangeKind.PAUSED)
+                    EVENT_SCREEN_NON_INTERACTIVE ->
+                        changes += ActivityChange("", null, ActivityChangeKind.SCREEN_OFF)
+                }
+            }
+            changes
         }
 
     private fun usageSince(

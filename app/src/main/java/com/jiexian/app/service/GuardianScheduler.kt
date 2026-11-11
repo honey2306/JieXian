@@ -18,7 +18,9 @@ object GuardianScheduler {
     private const val WATCHDOG_REQUEST_CODE = 4100
 
     fun start(context: Context) {
-        if (!PermissionUtils.isAccessibilityEnabledInSettings(context)) {
+        if (!PermissionUtils.isAccessibilityEnabledInSettings(context) &&
+            !PermissionUtils.canDrawOverlays(context)
+        ) {
             stop(context)
             return
         }

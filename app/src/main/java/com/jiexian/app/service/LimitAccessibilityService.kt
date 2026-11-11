@@ -5,7 +5,6 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
-import com.jiexian.app.admin.DeviceOwnerEnforcement
 import com.jiexian.app.data.RuleRepository
 import com.jiexian.app.data.UsageRepository
 import com.jiexian.app.model.ActiveLock
@@ -41,9 +40,6 @@ class LimitAccessibilityService : AccessibilityService() {
                 scope.launch {
                     GuardianHeartbeat.signal(this@LimitAccessibilityService)
                     snapshotter.snapshotAll()
-                    runCatching {
-                        DeviceOwnerEnforcement.sync(this@LimitAccessibilityService, repository)
-                    }
                     runCatching { reminderScheduler.check() }
                     runCatching { updateChecker.check() }
                     checkForeground(resolveFromUsage = true)
@@ -128,9 +124,6 @@ class LimitAccessibilityService : AccessibilityService() {
                     packageName = packageName,
                     allowOnlyRules = activeAllowOnlyRules(packageName),
                 )
-                runCatching {
-                    DeviceOwnerEnforcement.sync(this@LimitAccessibilityService, repository)
-                }
                 repository
                     .activeLocksForPackage(packageName, System.currentTimeMillis())
                     .maxByOrNull { it.unlockAt }

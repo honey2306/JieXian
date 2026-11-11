@@ -34,6 +34,7 @@ import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.NotificationsNone
+import androidx.compose.material.icons.outlined.OpenInFull
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material.icons.outlined.Timelapse
@@ -156,7 +157,6 @@ fun MainScreen(
 ) {
     var showAbout by remember { mutableStateOf(false) }
     var showGuardianLog by remember { mutableStateOf(false) }
-    var showEnforcement by remember { mutableStateOf(false) }
     val activeLocks = state.activeLocks.filter { it.unlockAt > state.nowMillis }
     val activeRuleCount = activeLocks.map(ActiveLock::sourceRuleId).distinct().size
     val copy =
@@ -217,7 +217,7 @@ fun MainScreen(
             if (!state.hasAccessibilityAccess || !state.guardianAlive) {
                 GuardianStoppedCard(
                     accessibilityGranted = state.hasAccessibilityAccess,
-                    deviceOwner = state.deviceOwner,
+                    overlayFallback = state.hasOverlayAccess,
                     onShowLog = { showGuardianLog = true },
                 )
             }
@@ -230,15 +230,11 @@ fun MainScreen(
             if (!state.hasUsageAccess ||
                 !state.hasAccessibilityAccess ||
                 !state.hasNotificationAccess ||
+                !state.hasOverlayAccess ||
                 !state.hasBackgroundAccess ||
                 guardianNeedsAttention
             ) {
                 PermissionCard(state = state, onShowGuardianLog = { showGuardianLog = true })
-            }
-
-            if (state.rules.any { it.type != RuleType.ALLOW_ONLY }) {
-                Spacer(Modifier.height(14.dp))
-                EnforcementCard(enabled = state.deviceOwner) { showEnforcement = true }
             }
 
             Row(
@@ -278,7 +274,6 @@ fun MainScreen(
     }
     if (showAbout) AboutDialog { showAbout = false }
     if (showGuardianLog) GuardianLogDialog { showGuardianLog = false }
-    if (showEnforcement) EnforcementDialog(enabled = state.deviceOwner) { showEnforcement = false }
 }
 
 private fun Modifier.nightAmbient(): Modifier =
@@ -379,7 +374,7 @@ private fun NightHero(
 @Composable
 private fun GuardianStoppedCard(
     accessibilityGranted: Boolean,
-    deviceOwner: Boolean,
+    overlayFallback: Boolean,
     onShowLog: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -395,9 +390,8 @@ private fun GuardianStoppedCard(
                 Text("守护已停止", color = NightText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 Text(
                     when {
-                        deviceOwner ->
-                            "无障碍被系统关闭了，但强制模式仍在生效：额度用尽的应用已被系统暂停，清理或重启都无法继续使用。"
                         accessibilityGranted -> "无障碍服务被系统停止了，点此重新开启"
+                        overlayFallback -> "无障碍被系统关闭了，正在用全屏覆盖继续拦截；重新开启后恢复自动返回桌面。"
                         else -> "系统「强行停止」或厂商深度清理会关闭无障碍；从多任务划掉不会。重新开启后自动恢复。"
                     },
                     color = NightMuted,
@@ -505,6 +499,18 @@ private fun PermissionCard(
                 state.hasAccessibilityAccess && state.guardianAlive,
             ) {
                 context.startActivity(PermissionUtils.accessibilitySettingsIntent())
+            }
+            PermissionRow(
+                Icons.Outlined.OpenInFull,
+                "悬浮窗兜底",
+                if (state.hasOverlayAccess) {
+                    "无障碍被关闭时，用全屏覆盖继续拦截"
+                } else {
+                    "守护被系统清掉后，用全屏覆盖继续挡住受限应用"
+                },
+                state.hasOverlayAccess,
+            ) {
+                context.startActivity(PermissionUtils.overlaySettingsIntent(context))
             }
             BackgroundRow(granted = state.hasBackgroundAccess) { showBackgroundGuide = true }
         }
@@ -854,107 +860,6 @@ private fun EmptyRules(onAddRule: () -> Unit) {
             }
         }
     }
-}
-
-@Composable
-private fun EnforcementCard(
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).clickable(onClick = onClick),
-        shape = RoundedCornerShape(20.dp),
-        color = GlassSurface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder),
-    ) {
-        Row(Modifier.padding(horizontal = 17.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                Icons.Outlined.Security,
-                contentDescription = null,
-                tint = if (enabled) Moonlight else NightMuted,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    if (enabled) "强制模式已开启" else "强制模式未开启",
-                    color = NightText,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                )
-                Text(
-                    if (enabled) {
-                        "额度用尽后由系统暂停应用，清理或重启都无法继续使用"
-                    } else {
-                        "只靠守护时，系统强制停止或深度清理可以绕过限制"
-                    },
-                    color = NightMuted,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(top = 3.dp),
-                )
-            }
-            Text(
-                if (enabled) "已开启" else "如何开启",
-                color = if (enabled) Moonlight else NightMuted,
-                style = MaterialTheme.typography.labelMedium,
-            )
-        }
-    }
-}
-
-@Composable
-private fun EnforcementDialog(
-    enabled: Boolean,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (enabled) "强制模式已开启" else "开启强制模式") },
-        text = {
-            Column(Modifier.heightIn(max = 460.dp).verticalScroll(rememberScrollState())) {
-                if (enabled) {
-                    Text(
-                        "现在额度用尽或进入禁用时段时，系统会暂停对应应用：应用无法启动，清理后台、重启手机都不会解除，只有到解锁时间才会自动恢复。",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    Text("如需解除强制模式，可以在电脑上执行：", color = NightMuted, style = MaterialTheme.typography.bodySmall)
-                    Text(
-                        "adb shell dpm remove-active-admin com.jiexian.app/.admin.JieXianDeviceAdminReceiver",
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
-                } else {
-                    Text(
-                        "只靠无障碍服务时，系统「强行停止」或厂商深度清理会关闭守护，限制就会被绕过。开启强制模式后，界限成为设备管理员（Device Owner），到点由系统直接暂停应用，不依赖无障碍服务。",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text("需要电脑一次性配置，无需 root：", color = NightMuted, style = MaterialTheme.typography.bodySmall)
-                    Text(
-                        "1. 手机上不要登录任何账号（已登录的先移除；部分机型需要恢复出厂设置后才能配置）\n" +
-                            "2. 打开开发者选项中的 USB 调试，连接电脑\n" +
-                            "3. 电脑上执行下面这行命令\n" +
-                            "4. 回到界限，这里会显示「强制模式已开启」",
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(top = 6.dp),
-                    )
-                    Text(
-                        "adb shell dpm set-device-owner com.jiexian.app/.admin.JieXianDeviceAdminReceiver",
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(top = 8.dp),
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        "注意：设备管理员最多只能设置一次，解除需要恢复出厂设置或上面提到的 adb 命令。强制模式只暂停规则里选中的应用，不影响其他应用和数据。",
-                        color = NightMuted,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } },
-    )
 }
 
 @Composable

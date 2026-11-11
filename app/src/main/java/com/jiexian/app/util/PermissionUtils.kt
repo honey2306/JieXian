@@ -44,6 +44,13 @@ object PermissionUtils {
         return runtimeGranted && NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
 
+    /** Whether the guard may draw its fallback overlay above other apps. */
+    fun canDrawOverlays(context: Context): Boolean = runCatching { Settings.canDrawOverlays(context) }.getOrDefault(false)
+
+    fun overlaySettingsIntent(context: Context): Intent =
+        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION)
+            .setData(Uri.parse("package:${context.packageName}"))
+
     fun isIgnoringBatteryOptimizations(context: Context): Boolean =
         context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
 

@@ -1,6 +1,5 @@
 <resources>
     <string name="app_name">界限</string>
-    <string name="device_admin_description">开启强制模式后，界限可以在额度用尽时调用系统暂停指定应用，即使守护被系统清理也不会被绕过。</string>
     <string name="accessibility_service_label">界限 · 应用守护</string>
     <string name="accessibility_service_description">检测已锁定应用是否进入前台，在达到每日限额或处于禁用时段时显示拦截提示，并根据本机使用统计发送额度、禁用开始和亮屏时长提醒。仅处理包名、应用窗口事件和规则判断，不读取屏幕内容、不读取音频、不上传个人数据；仅连接 GitHub 公开 Release 检查和下载应用更新。</string>
 </resources>
