@@ -44,6 +44,16 @@ class RuleEngineTest {
             endMinute = 9 * 60,
         )
 
+    private val groupTotalRule =
+        AppRule(
+            id = "group",
+            name = "组合额度",
+            targets = listOf(firstTarget, secondTarget),
+            type = RuleType.DAILY_LIMIT,
+            limitMinutes = 30,
+            totalLimitMinutes = 60,
+        )
+
     private fun at(
         day: Int,
         hour: Int,
@@ -122,6 +132,59 @@ class RuleEngineTest {
         val locks = RuleEngine.triggeredLocks(listOf(overnightRule, allowOnlyRule), "third.app", at(1, 23, 30), 0)
         // The block-list rule never matches an unlisted app; only the allow list locks it.
         assertEquals(1, locks.count { it.type == RuleType.ALLOW_ONLY })
+    }
+
+    @Test
+    fun `group total locks an app that used little of its own quota`() {
+        val totals =
+            RuleEngine.ruleUsageTotals(
+                listOf(groupTotalRule),
+                mapOf(
+                    firstTarget.packageName to 40 * 60_000L,
+                    secondTarget.packageName to 20 * 60_000L,
+                ),
+            )
+        assertEquals(60 * 60_000L, totals["group"])
+        val lock = RuleEngine.triggeredLocks(listOf(groupTotalRule), secondTarget.packageName, at(1, 20), 20 * 60_000L, totals).single()
+        assertEquals(at(2, 0).toInstant().toEpochMilli(), lock.unlockAt)
+        assertEquals("整组已计入 60 分钟，60 分钟总额度已用完", lock.detail)
+    }
+
+    @Test
+    fun `group total does not lock before the combined usage reaches it`() {
+        val totals = mapOf("group" to 59 * 60_000L)
+        assertTrue(RuleEngine.triggeredLocks(listOf(groupTotalRule), secondTarget.packageName, at(1, 20), 10 * 60_000L, totals).isEmpty())
+        assertTrue(
+            RuleEngine.triggeredLocks(listOf(groupTotalRule), secondTarget.packageName, at(1, 20), 10 * 60_000L, emptyMap()).isEmpty(),
+        )
+    }
+
+    @Test
+    fun `per app quota still locks while the group has room`() {
+        val totals =
+            RuleEngine.ruleUsageTotals(
+                listOf(groupTotalRule),
+                mapOf(
+                    firstTarget.packageName to 30 * 60_000L,
+                    secondTarget.packageName to 0L,
+                ),
+            )
+        val lock = RuleEngine.triggeredLocks(listOf(groupTotalRule), firstTarget.packageName, at(1, 20), 30 * 60_000L, totals).single()
+        assertEquals("今日已计入 30 分钟，30 分钟额度已用完", lock.detail)
+    }
+
+    @Test
+    fun `rule usage totals only sum targets of rules with a group limit`() {
+        val totals = RuleEngine.ruleUsageTotals(listOf(dailyRule, groupTotalRule), mapOf(firstTarget.packageName to 5 * 60_000L))
+        assertEquals(setOf("group"), totals.keys)
+        assertEquals(5 * 60_000L, totals["group"])
+    }
+
+    @Test
+    fun `group total must exceed the per app quota and stay within a day`() {
+        assertThrows(IllegalArgumentException::class.java) { groupTotalRule.copy(totalLimitMinutes = 30) }
+        assertThrows(IllegalArgumentException::class.java) { groupTotalRule.copy(totalLimitMinutes = 1441) }
+        assertThrows(IllegalArgumentException::class.java) { groupTotalRule.copy(totalLimitMinutes = 4) }
     }
 
     @Test

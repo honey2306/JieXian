@@ -12,7 +12,7 @@ import com.jiexian.app.model.ActiveLock
 import com.jiexian.app.model.AppRule
 import com.jiexian.app.model.AppTarget
 
-@Database(entities = [AppRule::class, ActiveLock::class], version = 2, exportSchema = false)
+@Database(entities = [AppRule::class, ActiveLock::class], version = 3, exportSchema = false)
 @TypeConverters(RuleTargetsConverter::class)
 abstract class JieXianDatabase : RoomDatabase() {
     abstract fun ruleDao(): RuleDao
@@ -27,7 +27,7 @@ abstract class JieXianDatabase : RoomDatabase() {
                         context.applicationContext,
                         JieXianDatabase::class.java,
                         "jiexian.db",
-                    ).addMigrations(MIGRATION_1_2)
+                    ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                     .also { instance = it }
             }
@@ -108,5 +108,13 @@ val MIGRATION_1_2 =
             )
             db.execSQL("DROP TABLE `active_locks`")
             db.execSQL("ALTER TABLE `active_locks_new` RENAME TO `active_locks`")
+        }
+    }
+
+val MIGRATION_2_3 =
+    object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Nullable on purpose: existing rules keep working without a group total.
+            db.execSQL("ALTER TABLE `app_rules` ADD COLUMN `totalLimitMinutes` INTEGER")
         }
     }

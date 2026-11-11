@@ -11,6 +11,7 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import com.jiexian.app.domain.AccessibilitySettings
 import com.jiexian.app.service.LimitAccessibilityService
 import com.jiexian.app.service.ProtectionState
 
@@ -22,14 +23,18 @@ object PermissionUtils {
 
     /** Whether the system still lists the guardian service as enabled, regardless of liveness. */
     fun isAccessibilityEnabledInSettings(context: Context): Boolean {
-        val expected = ComponentName(context, LimitAccessibilityService::class.java).flattenToString()
         val enabled =
-            Settings.Secure
-                .getString(
+            runCatching {
+                Settings.Secure.getString(
                     context.contentResolver,
                     Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
-                ).orEmpty()
-        return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+                )
+            }.getOrNull()
+        return AccessibilitySettings.isServiceListed(
+            value = enabled,
+            packageName = context.packageName,
+            serviceClass = LimitAccessibilityService::class.java.name,
+        )
     }
 
     fun hasNotificationAccess(context: Context): Boolean {

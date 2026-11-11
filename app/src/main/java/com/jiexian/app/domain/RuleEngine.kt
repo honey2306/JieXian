@@ -13,12 +13,17 @@ object RuleEngine {
         packageName: String,
         now: ZonedDateTime,
         usageTodayMillis: Long,
+        ruleTotalUsageMillis: Map<String, Long> = emptyMap(),
     ): List<ActiveLock> =
         rules.mapNotNull { rule ->
             when (rule.type) {
                 RuleType.DAILY_LIMIT -> {
                     val target = rule.targets.firstOrNull { it.packageName == packageName } ?: return@mapNotNull null
-                    if (usageTodayMillis < rule.limitMinutes * 60_000L) return@mapNotNull null
+                    val totalLimitMinutes = rule.totalLimitMinutes
+                    val totalUsedMillis = ruleTotalUsageMillis[rule.id] ?: 0L
+                    val perAppExhausted = usageTodayMillis >= rule.limitMinutes * 60_000L
+                    val totalExhausted = totalLimitMinutes != null && totalUsedMillis >= totalLimitMinutes * 60_000L
+                    if (!perAppExhausted && !totalExhausted) return@mapNotNull null
                     val tomorrow = now.toLocalDate().plusDays(1)
                     val unlockAt = tomorrow.atStartOfDay(now.zone).toInstant().toEpochMilli()
                     ActiveLock(
@@ -29,7 +34,12 @@ object RuleEngine {
                         appName = target.appName,
                         type = rule.type,
                         unlockAt = unlockAt,
-                        detail = "今日 ${rule.limitMinutes} 分钟额度已用完",
+                        detail =
+                            if (totalExhausted) {
+                                "整组已计入 ${totalUsedMillis / 60_000L} 分钟，$totalLimitMinutes 分钟总额度已用完"
+                            } else {
+                                "今日已计入 ${usageTodayMillis / 60_000L} 分钟，${rule.limitMinutes} 分钟额度已用完"
+                            },
                     )
                 }
 
@@ -73,6 +83,15 @@ object RuleEngine {
                 }
             }
         }
+
+    /** Combined usage per rule, for rules that have a group total limit. */
+    fun ruleUsageTotals(
+        rules: List<AppRule>,
+        usageTodayMillis: Map<String, Long>,
+    ): Map<String, Long> =
+        rules
+            .filter { it.totalLimitMinutes != null }
+            .associate { rule -> rule.id to rule.targets.sumOf { usageTodayMillis[it.packageName] ?: 0L } }
 
     fun remainingQuotaMillis(
         rules: List<AppRule>,

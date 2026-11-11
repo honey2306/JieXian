@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -76,6 +77,7 @@ import com.jiexian.app.ui.theme.NightMuted
 import com.jiexian.app.ui.theme.NightText
 import com.jiexian.app.update.ReleaseInfo
 import com.jiexian.app.util.PermissionUtils
+import com.jiexian.app.service.GuardianLog
 import com.jiexian.app.util.formatMinutes
 import com.jiexian.app.util.formatUsage
 import com.jiexian.app.util.unlockTimeLabel
@@ -153,6 +155,7 @@ fun MainScreen(
     onEditRule: (AppRule) -> Unit,
 ) {
     var showAbout by remember { mutableStateOf(false) }
+    var showGuardianLog by remember { mutableStateOf(false) }
     val activeLocks = state.activeLocks.filter { it.unlockAt > state.nowMillis }
     val activeRuleCount = activeLocks.map(ActiveLock::sourceRuleId).distinct().size
     val copy =
@@ -203,11 +206,18 @@ fun MainScreen(
             NightHero(
                 copy = copy,
                 hasAccess = state.hasUsageAccess && state.hasAccessibilityAccess && state.guardianAlive,
+                onlyGuardMissing =
+                    state.hasUsageAccess &&
+                        state.hasNotificationAccess &&
+                        (!state.hasAccessibilityAccess || !state.guardianAlive),
                 activeLocks = activeLocks,
             )
 
-            if (state.hasAccessibilityAccess && !state.guardianAlive) {
-                GuardianStoppedCard()
+            if (!state.hasAccessibilityAccess || !state.guardianAlive) {
+                GuardianStoppedCard(
+                    accessibilityGranted = state.hasAccessibilityAccess,
+                    onShowLog = { showGuardianLog = true },
+                )
             }
 
             state.availableUpdate?.let { update ->
@@ -221,7 +231,7 @@ fun MainScreen(
                 !state.hasBackgroundAccess ||
                 guardianNeedsAttention
             ) {
-                PermissionCard(state)
+                PermissionCard(state = state, onShowGuardianLog = { showGuardianLog = true })
             }
 
             Row(
@@ -260,6 +270,7 @@ fun MainScreen(
         }
     }
     if (showAbout) AboutDialog { showAbout = false }
+    if (showGuardianLog) GuardianLogDialog { showGuardianLog = false }
 }
 
 private fun Modifier.nightAmbient(): Modifier =
@@ -275,6 +286,7 @@ private fun Modifier.nightAmbient(): Modifier =
 private fun NightHero(
     copy: HomeCopy,
     hasAccess: Boolean,
+    onlyGuardMissing: Boolean,
     activeLocks: List<ActiveLock>,
 ) {
     Box(
@@ -305,7 +317,15 @@ private fun NightHero(
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                     Box(Modifier.size(5.dp).background(if (hasAccess) Moonlight else NightMuted, CircleShape))
                     Spacer(Modifier.width(7.dp))
-                    Text(if (hasAccess) copy.eyebrow else "完成授权后，安静才会开始", color = Moonlight, style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        when {
+                            hasAccess -> copy.eyebrow
+                            onlyGuardMissing -> "重新开启守护，安静继续"
+                            else -> "完成授权后，安静才会开始"
+                        },
+                        color = Moonlight,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
                 }
             }
             AnimatedContent(
@@ -349,7 +369,10 @@ private fun NightHero(
 }
 
 @Composable
-private fun GuardianStoppedCard() {
+private fun GuardianStoppedCard(
+    accessibilityGranted: Boolean,
+    onShowLog: () -> Unit,
+) {
     val context = LocalContext.current
     Surface(
         shape = RoundedCornerShape(20.dp),
@@ -362,11 +385,18 @@ private fun GuardianStoppedCard() {
             Column(Modifier.weight(1f)) {
                 Text("守护已停止", color = NightText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
                 Text(
-                    "系统清理或强制停止后，无障碍服务需要重新开启",
+                    if (accessibilityGranted) {
+                        "无障碍服务被系统停止了，点此重新开启"
+                    } else {
+                        "系统「强行停止」或厂商深度清理会关闭无障碍；从多任务划掉不会。重新开启后自动恢复。"
+                    },
                     color = NightMuted,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 3.dp),
                 )
+            }
+            TextButton(onClick = onShowLog) {
+                Text("诊断", color = NightMuted)
             }
             TextButton(onClick = { context.startActivity(PermissionUtils.accessibilitySettingsIntent()) }) {
                 Text("重新开启", color = Moonlight)
@@ -424,14 +454,21 @@ private fun UpdateCard(
 }
 
 @Composable
-private fun PermissionCard(state: MainUiState) {
+private fun PermissionCard(
+    state: MainUiState,
+    onShowGuardianLog: () -> Unit,
+) {
     val context = LocalContext.current
     var showBackgroundGuide by remember { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(22.dp), color = GlassSurface, border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)) {
         Column(Modifier.padding(17.dp)) {
-            Text("让守护真正开始", color = NightText, fontWeight = FontWeight.Medium)
+            val onlyGuard =
+                state.hasUsageAccess &&
+                    state.hasNotificationAccess &&
+                    (!state.hasAccessibilityAccess || !state.guardianAlive)
+            Text(if (onlyGuard) "让守护重新开始" else "让守护真正开始", color = NightText, fontWeight = FontWeight.Medium)
             Text(
-                "完成授权 · 数据始终留在本机",
+                if (onlyGuard) "只差应用守护服务 · 数据始终留在本机" else "完成授权 · 数据始终留在本机",
                 color = NightMuted,
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(top = 4.dp, bottom = 13.dp),
@@ -453,7 +490,7 @@ private fun PermissionCard(state: MainUiState) {
                 when {
                     state.hasAccessibilityAccess && state.guardianAlive -> "服务运行中"
                     state.hasAccessibilityAccess -> "被系统停止了，点此重新开启"
-                    else -> "识别并退出受限应用"
+                    else -> "被系统关闭了，点此重新开启"
                 },
                 state.hasAccessibilityAccess && state.guardianAlive,
             ) {
@@ -466,6 +503,10 @@ private fun PermissionCard(state: MainUiState) {
         BackgroundGuideDialog(
             context = context,
             batteryExempt = state.hasBackgroundAccess,
+            onShowLog = {
+                showBackgroundGuide = false
+                onShowGuardianLog()
+            },
             onDismiss = { showBackgroundGuide = false },
         )
     }
@@ -508,6 +549,7 @@ private fun BackgroundRow(
 private fun BackgroundGuideDialog(
     context: android.content.Context,
     batteryExempt: Boolean,
+    onShowLog: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -519,10 +561,17 @@ private fun BackgroundGuideDialog(
                     "清除多任务后，界限仍会继续拦截。国产系统（小米、华为、OPPO、vivo 等）还需要允许自启动，并允许后台运行，才能避免被系统清理。",
                 )
                 Spacer(Modifier.height(10.dp))
-                Text("被清理后，打开界限会显示「守护已停止」，重新开启无障碍服务即可恢复。", color = NightMuted)
+                Text("被清理后，打开界限会显示「守护已停止」。系统「强行停止」或深度清理会关闭无障碍，重新开启即可恢复；从多任务划掉则不会中断。", color = NightMuted)
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "小米、OPPO 等还可以在多任务界面把界限卡片锁定/加锁，减少被一键清理带走；若清理后需要重新开启无障碍，多半是 ROM 执行了强制停止级别的清理。",
+                    color = NightMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
                 Row(Modifier.padding(top = 8.dp)) {
                     TextButton(onClick = { openAutoStart(context) }) { Text("自启动设置") }
                     TextButton(onClick = { openAppDetails(context) }) { Text("应用信息") }
+                    TextButton(onClick = onShowLog) { Text("守护记录") }
                 }
             }
         },
@@ -541,10 +590,11 @@ private fun openBatteryOptimizations(context: android.content.Context) {
         openAppDetails(context)
         return
     }
-    PermissionUtils.batteryOptimizationIntents(context).forEach { intent ->
-        if (runCatching { context.startActivity(intent); true }.getOrDefault(false)) return
-    }
-    openAppDetails(context)
+    val opened =
+        PermissionUtils.batteryOptimizationIntents(context).any { intent ->
+            runCatching { context.startActivity(intent) }.isSuccess
+        }
+    if (!opened) openAppDetails(context)
 }
 
 private fun openAutoStart(context: android.content.Context) {
@@ -646,12 +696,21 @@ private fun RuleCard(
                 )
                 Text(
                     when {
-                        rule.type == RuleType.ALLOW_ONLY && rule.startMinute > rule.endMinute ->
+                        rule.type == RuleType.ALLOW_ONLY && rule.startMinute > rule.endMinute -> {
                             "跨越午夜 · 只允许 ${rule.targets.size} 个应用"
-                        rule.type == RuleType.ALLOW_ONLY ->
+                        }
+
+                        rule.type == RuleType.ALLOW_ONLY -> {
                             "每天重复 · 只允许 ${rule.targets.size} 个应用"
-                        rule.startMinute > rule.endMinute -> "跨越午夜 · ${rule.targets.size} 个应用"
-                        else -> "每天重复 · ${rule.targets.size} 个应用"
+                        }
+
+                        rule.startMinute > rule.endMinute -> {
+                            "跨越午夜 · ${rule.targets.size} 个应用"
+                        }
+
+                        else -> {
+                            "每天重复 · ${rule.targets.size} 个应用"
+                        }
                     },
                     color = NightMuted,
                     style = MaterialTheme.typography.bodySmall,
@@ -660,18 +719,36 @@ private fun RuleCard(
             } else {
                 val highestUsage = rule.targets.maxOfOrNull { usageToday[it.packageName] ?: 0L } ?: 0L
                 val limitMillis = rule.limitMinutes * 60_000L
+                val totalLimitMinutes = rule.totalLimitMinutes
+                val totalUsed = rule.targets.sumOf { usageToday[it.packageName] ?: 0L }
+                val totalLimitMillis = totalLimitMinutes?.let { it * 60_000L }
+                val remaining =
+                    listOfNotNull(
+                        (limitMillis - highestUsage).coerceAtLeast(0L),
+                        totalLimitMillis?.let { (it - totalUsed).coerceAtLeast(0L) },
+                    ).minOrNull() ?: 0L
+                val progress =
+                    listOfNotNull(
+                        highestUsage.toFloat() / limitMillis,
+                        totalLimitMillis?.let { totalUsed.toFloat() / it },
+                    ).maxOrNull()?.coerceIn(0f, 1f) ?: 0f
                 Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = 12.dp)) {
                     Text(
-                        if (activeLocks.isEmpty()) "最少剩余 ${formatUsage((limitMillis - highestUsage).coerceAtLeast(0L))}" else "今日额度已用完",
+                        if (activeLocks.isEmpty()) "最少剩余 ${formatUsage(remaining)}" else "今日额度已用完",
                         color = Moonlight,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Normal,
                         modifier = Modifier.weight(1f),
                     )
-                    Text("每个应用 ${formatMinutes(rule.limitMinutes)}", color = NightMuted, style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        "每个应用 ${formatMinutes(rule.limitMinutes)}" +
+                            (totalLimitMinutes?.let { " · 合计 ${formatMinutes(it)}" } ?: ""),
+                        color = NightMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                 }
                 LinearProgressIndicator(
-                    progress = { (highestUsage.toFloat() / limitMillis).coerceIn(0f, 1f) },
+                    progress = { progress },
                     modifier =
                         Modifier
                             .fillMaxWidth()
@@ -681,6 +758,27 @@ private fun RuleCard(
                     color = Moonlight,
                     trackColor = Color(0x18DCE7CC),
                 )
+                val busiestTarget = rule.targets.maxByOrNull { usageToday[it.packageName] ?: 0L }
+                if (busiestTarget != null) {
+                    Text(
+                        "已用最多：${busiestTarget.appName} ${formatUsage(highestUsage)}",
+                        color = NightMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (totalLimitMinutes != null) {
+                    Text(
+                        "组合计：${formatUsage(totalUsed)} / ${formatMinutes(totalLimitMinutes)}",
+                        color = NightMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(top = 4.dp),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
             Spacer(Modifier.height(18.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -737,6 +835,41 @@ private fun EmptyRules(onAddRule: () -> Unit) {
             }
         }
     }
+}
+
+@Composable
+private fun GuardianLogDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val entries = remember { GuardianLog.entries(context).asReversed() }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("守护记录") },
+        text = {
+            Column(
+                Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+            ) {
+                Text(
+                    "只保存在本机，用来判断无障碍是被系统清除，还是服务被系统解绑。最近的在最上面。",
+                    color = NightMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(bottom = 10.dp),
+                )
+                if (entries.isEmpty()) {
+                    Text("还没有记录。", color = NightMuted, style = MaterialTheme.typography.bodySmall)
+                } else {
+                    entries.forEach { entry ->
+                        Text(
+                            entry,
+                            color = NightText,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(vertical = 3.dp),
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
 }
 
 @Composable

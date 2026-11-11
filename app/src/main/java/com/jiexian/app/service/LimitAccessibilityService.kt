@@ -68,6 +68,7 @@ class LimitAccessibilityService : AccessibilityService() {
         guardScopeProvider = GuardScopeProvider(this)
         ProtectionState.setRunning(true)
         GuardianHeartbeat.signal(this)
+        GuardianLog.record(this, "无障碍服务已连接")
         // The foreground service keeps this process alive when the task is swiped away.
         GuardService.sync(this)
         handler.removeCallbacks(periodicCheck)
@@ -90,6 +91,7 @@ class LimitAccessibilityService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onUnbind(intent: Intent?): Boolean {
+        GuardianLog.record(this, "无障碍服务被系统解绑")
         ProtectionState.setRunning(false)
         handler.removeCallbacksAndMessages(null)
         // Keep the guardian process around so the system can rebind the service.

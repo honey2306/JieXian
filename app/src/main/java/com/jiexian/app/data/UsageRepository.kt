@@ -6,6 +6,9 @@ import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.os.Build
 import android.os.Process
+import com.jiexian.app.domain.AppUsageEvent
+import com.jiexian.app.domain.UsageCalculator
+import com.jiexian.app.domain.UsageStateEvent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -22,6 +25,11 @@ class UsageRepository(
     private val usageStatsManager by lazy {
         context.getSystemService(Context.USAGE_STATS_SERVICE) as UsageStatsManager
     }
+
+    private val usageLock = Any()
+    private var cachedDayStart = -1L
+    private var cachedAt = 0L
+    private var cachedUsage: Map<String, Long> = emptyMap()
 
     @Suppress("DEPRECATION")
     fun hasUsageAccess(): Boolean {
@@ -62,27 +70,76 @@ class UsageRepository(
             latest
         }
 
+    /**
+     * Foreground time per package since local midnight.
+     *
+     * Built from [UsageEvents] instead of summed [UsageStats] buckets: several devices return
+     * overlapping buckets for one package, and summing them counted usage twice, so a quota
+     * could lock before the user actually used it.
+     */
     suspend fun usageToday(packageNames: Collection<String>): Map<String, Long> =
         withContext(Dispatchers.IO) {
             if (!hasUsageAccess() || packageNames.isEmpty()) return@withContext emptyMap()
             val zone = ZoneId.systemDefault()
-            val start =
+            val dayStart =
                 LocalDate
                     .now(zone)
                     .atStartOfDay(zone)
                     .toInstant()
                     .toEpochMilli()
             val now = System.currentTimeMillis()
-            val result = packageNames.associateWith { 0L }.toMutableMap()
-            usageStatsManager
-                .queryUsageStats(UsageStatsManager.INTERVAL_DAILY, start, now)
-                .orEmpty()
-                .filter { it.packageName in result }
-                .forEach { stats ->
-                    // Some Android versions return more than one bucket for the same package.
-                    result[stats.packageName] = (result[stats.packageName] ?: 0L) +
-                        stats.totalTimeInForeground.coerceAtLeast(0L)
-                }
-            result
+            usageSince(dayStart, now).filterKeys { it in packageNames }
         }
+
+    private fun usageSince(
+        dayStart: Long,
+        now: Long,
+    ): Map<String, Long> =
+        synchronized(usageLock) {
+            if (dayStart == cachedDayStart && now - cachedAt in 0..CACHE_TTL_MILLIS) return cachedUsage
+            val events = foregroundEvents(dayStart - LOOKBACK_MILLIS, now)
+            val usage = UsageCalculator.foregroundMillis(events, dayStart, now)
+            cachedDayStart = dayStart
+            cachedAt = now
+            cachedUsage = usage
+            usage
+        }
+
+    private fun foregroundEvents(
+        startMillis: Long,
+        endMillis: Long,
+    ): List<AppUsageEvent> {
+        val events = runCatching { usageStatsManager.queryEvents(startMillis, endMillis) }.getOrNull() ?: return emptyList()
+        val event = UsageEvents.Event()
+        return buildList {
+            while (events.getNextEvent(event)) {
+                val state =
+                    when (event.eventType) {
+                        UsageEvents.Event.MOVE_TO_FOREGROUND -> UsageStateEvent.FOREGROUND
+                        UsageEvents.Event.MOVE_TO_BACKGROUND -> UsageStateEvent.BACKGROUND
+                        EVENT_ACTIVITY_STOPPED -> UsageStateEvent.BACKGROUND
+                        EVENT_SCREEN_NON_INTERACTIVE -> UsageStateEvent.SCREEN_OFF
+                        else -> null
+                    } ?: continue
+                add(
+                    AppUsageEvent(
+                        packageName = event.packageName.orEmpty(),
+                        atMillis = event.timeStamp,
+                        state = state,
+                    ),
+                )
+            }
+        }
+    }
+
+    companion object {
+        private const val LOOKBACK_MILLIS = 6 * 60 * 60 * 1000L
+        private const val CACHE_TTL_MILLIS = 3_000L
+
+        /** `ACTIVITY_STOPPED` on API 29+, inlined so the field is never touched on older devices. */
+        private const val EVENT_ACTIVITY_STOPPED = 23
+
+        /** `SCREEN_NON_INTERACTIVE` on API 28+; older systems report a background event instead. */
+        private const val EVENT_SCREEN_NON_INTERACTIVE = 16
+    }
 }

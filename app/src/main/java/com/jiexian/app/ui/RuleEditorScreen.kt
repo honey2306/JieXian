@@ -46,6 +46,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
@@ -74,6 +76,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.jiexian.app.data.InstalledApp
 import com.jiexian.app.model.AppRule
 import com.jiexian.app.model.AppTarget
+import com.jiexian.app.model.MAX_TOTAL_LIMIT_MINUTES
 import com.jiexian.app.model.RuleType
 import com.jiexian.app.model.minuteLabel
 import com.jiexian.app.ui.components.AppIcon
@@ -82,6 +85,7 @@ import com.jiexian.app.ui.theme.Moonlight
 import com.jiexian.app.ui.theme.NightMuted
 import com.jiexian.app.ui.theme.NightSurface
 import com.jiexian.app.ui.theme.NightText
+import com.jiexian.app.util.formatMinutes
 import com.jiexian.app.util.unlockTimeLabel
 import kotlin.math.roundToInt
 
@@ -101,6 +105,7 @@ fun RuleEditorScreen(
     var selectedTargets by remember { mutableStateOf(existingRule?.targets.orEmpty()) }
     var ruleType by remember { mutableStateOf(existingRule?.type ?: RuleType.DAILY_LIMIT) }
     var limitMinutes by remember { mutableStateOf(existingRule?.limitMinutes ?: 30) }
+    var totalLimitMinutes by remember { mutableStateOf(existingRule?.totalLimitMinutes) }
     var startMinute by remember { mutableStateOf(existingRule?.startMinute ?: 23 * 60) }
     var endMinute by remember { mutableStateOf(existingRule?.endMinute ?: 9 * 60) }
     var showAppPicker by remember { mutableStateOf(false) }
@@ -176,6 +181,7 @@ fun RuleEditorScreen(
                                     targets = selectedTargets.distinctBy(AppTarget::packageName),
                                     type = ruleType,
                                     limitMinutes = limitMinutes,
+                                    totalLimitMinutes = if (ruleType == RuleType.DAILY_LIMIT) totalLimitMinutes else null,
                                     startMinute = startMinute,
                                     endMinute = endMinute,
                                 ),
@@ -326,7 +332,18 @@ fun RuleEditorScreen(
                     border = androidx.compose.foundation.BorderStroke(1.dp, EditorBorder),
                 ) {
                     if (ruleType == RuleType.DAILY_LIMIT) {
-                        DailyLimitEditor(limitMinutes, onChange = { limitMinutes = it })
+                        DailyLimitEditor(
+                            limitMinutes = limitMinutes,
+                            totalLimitMinutes = totalLimitMinutes,
+                            onChange = { next ->
+                                limitMinutes = next
+                                val total = totalLimitMinutes
+                                if (total != null && total <= next) {
+                                    totalLimitMinutes = (next + 5).coerceAtMost(MAX_TOTAL_LIMIT_MINUTES)
+                                }
+                            },
+                            onTotalChange = { totalLimitMinutes = it },
+                        )
                     } else {
                         TimeWindowEditor(
                             startMinute = startMinute,
@@ -428,7 +445,9 @@ private fun TypeOption(
 @Composable
 private fun DailyLimitEditor(
     limitMinutes: Int,
+    totalLimitMinutes: Int?,
     onChange: (Int) -> Unit,
+    onTotalChange: (Int?) -> Unit,
 ) {
     Column(Modifier.padding(horizontal = 21.dp, vertical = 23.dp)) {
         Text("每个应用，每天可以使用", color = NightMuted, style = MaterialTheme.typography.bodyMedium)
@@ -492,6 +511,123 @@ private fun DailyLimitEditor(
                                 },
                             ).clickable { onChange(minutes) }
                             .padding(horizontal = 10.dp, vertical = 8.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .border(1.dp, EditorBorder, RoundedCornerShape(18.dp))
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("这组应用合计上限", color = NightText, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "合计用完后，组内所有应用一起停止",
+                        color = NightMuted,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(top = 3.dp),
+                    )
+                }
+                Switch(
+                    checked = totalLimitMinutes != null,
+                    onCheckedChange = { enabled ->
+                        onTotalChange(
+                            if (enabled) {
+                                (limitMinutes + 30).coerceAtMost(MAX_TOTAL_LIMIT_MINUTES)
+                            } else {
+                                null
+                            },
+                        )
+                    },
+                    colors =
+                        SwitchDefaults.colors(
+                            checkedThumbColor = Forest,
+                            checkedTrackColor = Moonlight,
+                            uncheckedThumbColor = NightMuted,
+                            uncheckedTrackColor = Color(0x22DCE7CC),
+                        ),
+                )
+            }
+            if (totalLimitMinutes != null) {
+                val minTotal = (limitMinutes + 5).coerceAtMost(MAX_TOTAL_LIMIT_MINUTES)
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    Text(
+                        "$totalLimitMinutes",
+                        color = NightText,
+                        fontSize = 40.sp,
+                        lineHeight = 44.sp,
+                        fontWeight = FontWeight.Light,
+                    )
+                    Text(
+                        "分钟（合计）",
+                        color = NightMuted,
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.padding(start = 6.dp, bottom = 6.dp),
+                    )
+                }
+                Slider(
+                    value = totalLimitMinutes.toFloat(),
+                    onValueChange = { onTotalChange((it / 5f).roundToInt().times(5).coerceIn(minTotal, MAX_TOTAL_LIMIT_MINUTES)) },
+                    valueRange = minTotal.toFloat()..MAX_TOTAL_LIMIT_MINUTES.toFloat(),
+                    thumb = { Box(Modifier.size(14.dp).background(Moonlight, CircleShape)) },
+                    track = { sliderState ->
+                        val span = (MAX_TOTAL_LIMIT_MINUTES - minTotal).toFloat().coerceAtLeast(1f)
+                        val progress = ((sliderState.value - minTotal) / span).coerceIn(0f, 1f)
+                        Box(Modifier.fillMaxWidth().height(20.dp), contentAlignment = Alignment.CenterStart) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .height(3.dp)
+                                    .clip(CircleShape)
+                                    .background(Moonlight.copy(alpha = 0.13f)),
+                            )
+                            Box(
+                                Modifier
+                                    .fillMaxWidth(progress)
+                                    .height(3.dp)
+                                    .clip(CircleShape)
+                                    .background(Moonlight),
+                            )
+                        }
+                    },
+                    colors =
+                        SliderDefaults.colors(
+                            activeTrackColor = Moonlight,
+                            inactiveTrackColor = Moonlight.copy(alpha = 0.13f),
+                        ),
+                    modifier = Modifier.padding(top = 9.dp),
+                )
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    listOf(60, 90, 120, 180, 240, 360)
+                        .filter { it > limitMinutes }
+                        .take(4)
+                        .forEach { minutes ->
+                            Text(
+                                formatMinutes(minutes),
+                                color = if (totalLimitMinutes == minutes) Moonlight else NightMuted,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (totalLimitMinutes == minutes) FontWeight.SemiBold else FontWeight.Normal,
+                                modifier =
+                                    Modifier
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .background(if (totalLimitMinutes == minutes) Color(0x1FD2E4BE) else Color.Transparent)
+                                        .clickable { onTotalChange(minutes.coerceAtLeast(minTotal)) }
+                                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                            )
+                        }
+                }
+                Text(
+                    "组内合计超过 ${formatMinutes(totalLimitMinutes)}后，全部一起停止",
+                    color = NightMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(top = 8.dp),
                 )
             }
         }

@@ -49,6 +49,7 @@ class GuardService : Service() {
         super.onCreate()
         running = true
         createChannel()
+        GuardianLog.record(this, "常驻守护启动")
     }
 
     override fun onStartCommand(
@@ -70,6 +71,7 @@ class GuardService : Service() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         // Some launchers stop the whole app when the task is swiped away. Re-arm the watchdog
         // so the process comes back even if the system ignores START_STICKY.
+        GuardianLog.record(this, "任务被划掉，守护仍在")
         GuardianScheduler.ensureWatchdog(this)
         super.onTaskRemoved(rootIntent)
     }
@@ -77,6 +79,7 @@ class GuardService : Service() {
     override fun onDestroy() {
         running = false
         handler.removeCallbacksAndMessages(null)
+        GuardianLog.record(this, "常驻守护停止")
         super.onDestroy()
     }
 

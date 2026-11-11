@@ -13,7 +13,10 @@ class GuardianRestartReceiver : BroadcastReceiver() {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
             GuardianScheduler.ACTION_WATCHDOG,
-            -> GuardianScheduler.start(context)
+            -> {
+                GuardianLog.record(context, "自愈唤醒：${intent.action}")
+                GuardianScheduler.start(context)
+            }
         }
     }
 }

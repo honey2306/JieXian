@@ -11,6 +11,7 @@ import com.jiexian.app.model.ActiveLock
 import com.jiexian.app.model.AppRule
 import com.jiexian.app.service.GuardService
 import com.jiexian.app.service.GuardianHeartbeat
+import com.jiexian.app.service.GuardianLog
 import com.jiexian.app.service.LockSnapshotter
 import com.jiexian.app.service.ReminderScheduler
 import com.jiexian.app.update.ReleaseInfo
@@ -55,7 +56,10 @@ class MainViewModel(
     private val _state = MutableStateFlow(MainUiState(availableUpdate = updateChecker.cachedUpdate()))
     val state: StateFlow<MainUiState> = _state.asStateFlow()
 
+    private var loggedMissingAccessibility = false
+
     init {
+        recordLaunch()
         viewModelScope.launch {
             repository.rules.collect { rules ->
                 _state.update { it.copy(rules = rules) }
@@ -75,8 +79,33 @@ class MainViewModel(
         }
     }
 
+    /** Records how the guardian looked at launch, so a vendor kill can be diagnosed later. */
+    private fun recordLaunch() {
+        val context = getApplication<Application>()
+        val listed = PermissionUtils.isAccessibilityEnabledInSettings(context)
+        // A recent heartbeat only proves the service ran, not that the grant still exists.
+        val alive = listed && GuardianHeartbeat.isAlive(context)
+        val lastSignal = GuardianHeartbeat.lastSignalAt(context)
+        val age =
+            if (lastSignal <= 0L) {
+                "从未"
+            } else {
+                val minutes = (System.currentTimeMillis() - lastSignal) / 60_000L
+                if (minutes < 1) "刚刚" else "$minutes 分钟前"
+            }
+        GuardianLog.record(
+            context,
+            "打开 app · 无障碍${if (listed) "已授权" else "未授权"} · 守护${if (alive) "存活" else "已停止"} · 上次心跳 $age",
+        )
+        loggedMissingAccessibility = !listed
+    }
+
     fun refresh() {
         val context = getApplication<Application>()
+        if (!loggedMissingAccessibility && !PermissionUtils.isAccessibilityEnabledInSettings(context)) {
+            loggedMissingAccessibility = true
+            GuardianLog.record(context, "检测到无障碍未授权（系统未列出守护服务）")
+        }
         _state.update {
             it.copy(
                 hasUsageAccess = usageRepository.hasUsageAccess(),

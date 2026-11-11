@@ -47,10 +47,20 @@ class LockSnapshotter(
             }
         val dailyPackages =
             candidates
-                .filterValues { rules ->
-                    rules.any { it.type == RuleType.DAILY_LIMIT }
-                }.keys
+                .values
+                .flatten()
+                .filter { it.type == RuleType.DAILY_LIMIT }
+                .flatMap { rule -> rule.targets.map { it.packageName } }
+                .toSet()
         val usage = usageRepository.usageToday(dailyPackages)
+        val ruleTotals =
+            RuleEngine.ruleUsageTotals(
+                candidates.values
+                    .flatten()
+                    .filter { it.type == RuleType.DAILY_LIMIT }
+                    .distinctBy(AppRule::id),
+                usage,
+            )
         val nowMillis = now.toInstant().toEpochMilli()
 
         candidates.forEach { (packageName, rules) ->
@@ -61,6 +71,7 @@ class LockSnapshotter(
                     packageName = packageName,
                     now = now,
                     usageTodayMillis = usage[packageName] ?: 0L,
+                    ruleTotalUsageMillis = ruleTotals,
                 )
             triggered
                 // An edit affects future cycles, never creates a second lock for the current cycle.
