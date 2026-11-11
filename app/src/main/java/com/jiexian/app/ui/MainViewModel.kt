@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.jiexian.app.data.InstalledApp
+import com.jiexian.app.admin.DeviceOwnerEnforcement
 import com.jiexian.app.data.InstalledAppsRepository
 import com.jiexian.app.data.RuleRepository
 import com.jiexian.app.data.UsageRepository
@@ -35,6 +36,8 @@ data class MainUiState(
     val hasAccessibilityAccess: Boolean = false,
     val hasNotificationAccess: Boolean = false,
     val guardianAlive: Boolean = true,
+    /** Device owner enforcement is active, so locked apps are suspended by the system. */
+    val deviceOwner: Boolean = false,
     val hasBackgroundAccess: Boolean = true,
     val nowMillis: Long = System.currentTimeMillis(),
     val message: String? = null,
@@ -112,6 +115,7 @@ class MainViewModel(
                 hasAccessibilityAccess = PermissionUtils.isAccessibilityEnabled(context),
                 hasNotificationAccess = PermissionUtils.hasNotificationAccess(context),
                 guardianAlive = GuardianHeartbeat.isAlive(context),
+                deviceOwner = DeviceOwnerEnforcement.isDeviceOwner(context),
                 hasBackgroundAccess = PermissionUtils.isIgnoringBatteryOptimizations(context),
                 nowMillis = System.currentTimeMillis(),
                 activeLocks = it.activeLocks.filter { lock -> lock.unlockAt > System.currentTimeMillis() },
@@ -119,6 +123,9 @@ class MainViewModel(
         }
         refreshUsage()
         GuardService.sync(context)
+        viewModelScope.launch {
+            runCatching { DeviceOwnerEnforcement.sync(context, repository) }
+        }
         viewModelScope.launch { runCatching { reminderScheduler.check() } }
         viewModelScope.launch {
             runCatching { updateChecker.check() }
@@ -143,6 +150,9 @@ class MainViewModel(
             if (isEditing) repository.updateRule(rule) else repository.addRule(rule)
             // A rule saved during its disabled window starts that cycle immediately.
             snapshotter.snapshotAll()
+            runCatching {
+                DeviceOwnerEnforcement.sync(getApplication(), repository)
+            }
             val lockActive =
                 repository
                     .activeLocksForRule(rule.id, System.currentTimeMillis())
@@ -167,6 +177,9 @@ class MainViewModel(
                     .activeLocksForRule(rule.id, System.currentTimeMillis())
                     .isNotEmpty()
             repository.deleteRule(rule)
+            runCatching {
+                DeviceOwnerEnforcement.sync(getApplication(), repository)
+            }
             _state.update {
                 it.copy(
                     message =

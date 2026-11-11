@@ -119,6 +119,7 @@ class UsageRepository(
                         UsageEvents.Event.MOVE_TO_BACKGROUND -> UsageStateEvent.BACKGROUND
                         EVENT_ACTIVITY_STOPPED -> UsageStateEvent.BACKGROUND
                         EVENT_SCREEN_NON_INTERACTIVE -> UsageStateEvent.SCREEN_OFF
+                        EVENT_DEVICE_SHUTDOWN -> UsageStateEvent.SHUTDOWN
                         else -> null
                     } ?: continue
                 add(
@@ -126,6 +127,7 @@ class UsageRepository(
                         packageName = event.packageName.orEmpty(),
                         atMillis = event.timeStamp,
                         state = state,
+                        activityClass = event.className,
                     ),
                 )
             }
@@ -133,7 +135,11 @@ class UsageRepository(
     }
 
     companion object {
-        private const val LOOKBACK_MILLIS = 6 * 60 * 60 * 1000L
+        /**
+         * Also look back before midnight so an app that stayed in the foreground across the
+         * daylight boundary is still counted, instead of missing its start event.
+         */
+        private const val LOOKBACK_MILLIS = 12 * 60 * 60 * 1000L
         private const val CACHE_TTL_MILLIS = 3_000L
 
         /** `ACTIVITY_STOPPED` on API 29+, inlined so the field is never touched on older devices. */
@@ -141,5 +147,8 @@ class UsageRepository(
 
         /** `SCREEN_NON_INTERACTIVE` on API 28+; older systems report a background event instead. */
         private const val EVENT_SCREEN_NON_INTERACTIVE = 16
+
+        /** `DEVICE_SHUTDOWN`; the app cannot observe a rebooting device any other way. */
+        private const val EVENT_DEVICE_SHUTDOWN = 26
     }
 }

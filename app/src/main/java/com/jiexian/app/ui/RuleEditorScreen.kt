@@ -86,6 +86,7 @@ import com.jiexian.app.ui.theme.NightMuted
 import com.jiexian.app.ui.theme.NightSurface
 import com.jiexian.app.ui.theme.NightText
 import com.jiexian.app.util.formatMinutes
+import com.jiexian.app.util.formatUsage
 import com.jiexian.app.util.unlockTimeLabel
 import kotlin.math.roundToInt
 
@@ -307,6 +308,42 @@ fun RuleEditorScreen(
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 10.dp),
                     )
+                }
+                if (ruleType == RuleType.DAILY_LIMIT && selectedTargets.isNotEmpty()) {
+                    Column(Modifier.padding(top = 14.dp)) {
+                        selectedTargets
+                            .sortedByDescending { state.usageToday[it.packageName] ?: 0L }
+                            .take(6)
+                            .forEach { target ->
+                                val used = state.usageToday[target.packageName] ?: 0L
+                                Row(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        target.appName,
+                                        color = NightText,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text(
+                                        "今日已用 ${formatUsage(used)} / ${formatMinutes(limitMinutes)}",
+                                        color = if (used >= limitMinutes * 60_000L) MaterialTheme.colorScheme.error else NightMuted,
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                }
+                            }
+                        if (selectedTargets.size > 6) {
+                            Text(
+                                "还有 ${selectedTargets.size - 6} 个应用",
+                                color = NightMuted,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
+                    }
                 }
 
                 Spacer(Modifier.height(23.dp))
