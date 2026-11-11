@@ -24,22 +24,46 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.jiexian.app.enforce.ShizukuEnforcement
+import com.jiexian.app.enforce.ShizukuShell
 import com.jiexian.app.model.AppRule
 import com.jiexian.app.ui.MainScreen
 import com.jiexian.app.ui.MainViewModel
 import com.jiexian.app.ui.RuleEditorScreen
 import com.jiexian.app.ui.theme.JieXianTheme
+import rikka.shizuku.Shizuku
 
 class MainActivity : ComponentActivity() {
     private val mainViewModel: MainViewModel by lazy {
         androidx.lifecycle.ViewModelProvider(this)[MainViewModel::class.java]
     }
+
+    private val permissionResultListener =
+        Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+            if (requestCode == SHIZUKU_PERMISSION_REQUEST) {
+                mainViewModel.refresh()
+                if (grantResult == PackageManager.PERMISSION_GRANTED) {
+                    mainViewModel.onSystemLockGranted()
+                }
+            }
+        }
+    private val binderReceivedListener = Shizuku.OnBinderReceivedListener { mainViewModel.refresh() }
+    private val binderDeadListener =
+        Shizuku.OnBinderDeadListener {
+            ShizukuShell.reset()
+            mainViewModel.refresh()
+        }
     private val notificationPermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { mainViewModel.refresh() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        runCatching {
+            Shizuku.addRequestPermissionResultListener(permissionResultListener)
+            Shizuku.addBinderReceivedListenerSticky(binderReceivedListener)
+            Shizuku.addBinderDeadListener(binderDeadListener)
+        }
         setContent {
             JieXianTheme {
                 val state by mainViewModel.state.collectAsStateWithLifecycle()
@@ -90,6 +114,14 @@ class MainActivity : ComponentActivity() {
                         } else {
                             MainScreen(
                                 state = state,
+                                onRequestSystemLock = {
+                                    val state = mainViewModel.state.value.systemLock
+                                    if (state == ShizukuEnforcement.State.READY) {
+                                        mainViewModel.refresh()
+                                    } else {
+                                        ShizukuEnforcement.requestPermission(SHIZUKU_PERMISSION_REQUEST)
+                                    }
+                                },
                                 onCheckUpdates = mainViewModel::checkForUpdates,
                                 onInstallUpdate = mainViewModel::installUpdate,
                                 onAddRule = {
@@ -111,5 +143,18 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         mainViewModel.refresh()
+    }
+
+    override fun onDestroy() {
+        runCatching {
+            Shizuku.removeRequestPermissionResultListener(permissionResultListener)
+            Shizuku.removeBinderReceivedListener(binderReceivedListener)
+            Shizuku.removeBinderDeadListener(binderDeadListener)
+        }
+        super.onDestroy()
+    }
+
+    private companion object {
+        const val SHIZUKU_PERMISSION_REQUEST = 4102
     }
 }

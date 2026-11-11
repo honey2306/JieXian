@@ -31,6 +31,9 @@ interface RuleDao {
     @Query("SELECT * FROM active_locks WHERE unlockAt > :now ORDER BY unlockAt ASC")
     fun observeActiveLocks(now: Long): Flow<List<ActiveLock>>
 
+    @Query("SELECT * FROM active_locks WHERE unlockAt > :now")
+    suspend fun locksNow(now: Long): List<ActiveLock>
+
     @Query("SELECT * FROM active_locks WHERE packageName = :packageName AND unlockAt > :now")
     suspend fun activeLocksForPackage(
         packageName: String,

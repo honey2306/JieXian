@@ -78,6 +78,7 @@ import com.jiexian.app.ui.theme.NightMuted
 import com.jiexian.app.ui.theme.NightText
 import com.jiexian.app.update.ReleaseInfo
 import com.jiexian.app.util.PermissionUtils
+import com.jiexian.app.enforce.ShizukuEnforcement
 import com.jiexian.app.service.GuardianLog
 import com.jiexian.app.util.formatMinutes
 import com.jiexian.app.util.formatUsage
@@ -154,9 +155,11 @@ fun MainScreen(
     onInstallUpdate: () -> Unit,
     onAddRule: () -> Unit,
     onEditRule: (AppRule) -> Unit,
+    onRequestSystemLock: () -> Unit,
 ) {
     var showAbout by remember { mutableStateOf(false) }
     var showGuardianLog by remember { mutableStateOf(false) }
+    var showSystemLock by remember { mutableStateOf(false) }
     val activeLocks = state.activeLocks.filter { it.unlockAt > state.nowMillis }
     val activeRuleCount = activeLocks.map(ActiveLock::sourceRuleId).distinct().size
     val copy =
@@ -237,6 +240,11 @@ fun MainScreen(
                 PermissionCard(state = state, onShowGuardianLog = { showGuardianLog = true })
             }
 
+            if (state.rules.any { it.type != RuleType.ALLOW_ONLY }) {
+                Spacer(Modifier.height(14.dp))
+                SystemLockCard(state.systemLock) { showSystemLock = true }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -274,6 +282,16 @@ fun MainScreen(
     }
     if (showAbout) AboutDialog { showAbout = false }
     if (showGuardianLog) GuardianLogDialog { showGuardianLog = false }
+    if (showSystemLock) {
+        SystemLockDialog(
+            state = state.systemLock,
+            onRequest = {
+                showSystemLock = false
+                onRequestSystemLock()
+            },
+            onDismiss = { showSystemLock = false },
+        )
+    }
 }
 
 private fun Modifier.nightAmbient(): Modifier =
@@ -860,6 +878,147 @@ private fun EmptyRules(onAddRule: () -> Unit) {
             }
         }
     }
+}
+
+@Composable
+private fun SystemLockCard(
+    state: ShizukuEnforcement.State,
+    onClick: () -> Unit,
+) {
+    val title =
+        when (state) {
+            ShizukuEnforcement.State.READY -> "系统封锁已启用"
+            ShizukuEnforcement.State.UNAUTHORIZED -> "系统封锁待授权"
+            ShizukuEnforcement.State.UNAVAILABLE -> "系统封锁未启用"
+        }
+    val detail =
+        when (state) {
+            ShizukuEnforcement.State.READY ->
+                "到点由系统暂停应用：没有延时，杀掉界限或重启也不解除"
+            ShizukuEnforcement.State.UNAUTHORIZED ->
+                "Shizuku 已运行，点此允许界限执行系统命令"
+            ShizukuEnforcement.State.UNAVAILABLE ->
+                "安装并激活 Shizuku 后，到点由系统暂停应用，清理或重启都绕不开"
+        }
+    val action =
+        when (state) {
+            ShizukuEnforcement.State.READY -> "已启用"
+            ShizukuEnforcement.State.UNAUTHORIZED -> "去授权"
+            ShizukuEnforcement.State.UNAVAILABLE -> "了解"
+        }
+    Surface(
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(20.dp)).clickable(onClick = onClick),
+        shape = RoundedCornerShape(20.dp),
+        color = GlassSurface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder),
+    ) {
+        Row(Modifier.padding(horizontal = 17.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                Icons.Outlined.Security,
+                contentDescription = null,
+                tint = if (state == ShizukuEnforcement.State.READY) Moonlight else NightMuted,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, color = NightText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    detail,
+                    color = NightMuted,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
+            Text(
+                action,
+                color = if (state == ShizukuEnforcement.State.READY) Moonlight else NightMuted,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SystemLockDialog(
+    state: ShizukuEnforcement.State,
+    onRequest: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val context = LocalContext.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("系统封锁（Shizuku）") },
+        text = {
+            Column(Modifier.heightIn(max = 470.dp).verticalScroll(rememberScrollState())) {
+                when (state) {
+                    ShizukuEnforcement.State.READY -> {
+                        Text(
+                            "已启用。额度用尽或进入禁用时段时，界限会请系统暂停对应应用：应用无法启动，也没有任何延时入口；杀掉界限、清理后台、重启手机都不会解除，到解锁时间自动恢复。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "同时会在无障碍被系统清掉时自动写回授权，不再要求你重新授权。",
+                            color = NightMuted,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "注意：Shizuku 在手机重启后需要重新激活；未激活期间会自动退回无障碍 + 悬浮窗。",
+                            color = NightMuted,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+
+                    ShizukuEnforcement.State.UNAUTHORIZED -> {
+                        Text(
+                            "Shizuku 正在运行。点「授权」后，界限就能通过它调用系统命令，把到点的应用设为系统暂停。除了暂停应用，只会写入无障碍授权，不做其他事情。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+
+                    ShizukuEnforcement.State.UNAVAILABLE -> {
+                        Text(
+                            "系统封锁需要 Shizuku（开源、无需 root，不恢复出厂）。它让界限借用 ADB shell 身份，到点由系统暂停应用——没有延时，杀掉界限或重启都不解除。",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Text("1. 安装 Shizuku", style = MaterialTheme.typography.bodySmall)
+                        Text("2. 打开开发者选项里的「无线调试」", style = MaterialTheme.typography.bodySmall)
+                        Text("3. 在 Shizuku 里配对接管，然后回到界限授权", style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(
+                            onClick = {
+                                runCatching {
+                                    context.startActivity(
+                                        android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse("https://github.com/RikkaApps/Shizuku/releases"),
+                                        ),
+                                    )
+                                }
+                            },
+                        ) { Text("打开 Shizuku 下载页", color = Moonlight) }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (state == ShizukuEnforcement.State.UNAUTHORIZED) onRequest() else onDismiss()
+                },
+            ) {
+                Text(if (state == ShizukuEnforcement.State.UNAUTHORIZED) "授权" else "知道了")
+            }
+        },
+        dismissButton =
+            if (state == ShizukuEnforcement.State.UNAUTHORIZED) {
+                { TextButton(onClick = onDismiss) { Text("取消") } }
+            } else {
+                null
+            },
+    )
 }
 
 @Composable

@@ -7,6 +7,7 @@ import com.jiexian.app.data.InstalledApp
 import com.jiexian.app.data.InstalledAppsRepository
 import com.jiexian.app.data.RuleRepository
 import com.jiexian.app.data.UsageRepository
+import com.jiexian.app.enforce.ShizukuEnforcement
 import com.jiexian.app.model.ActiveLock
 import com.jiexian.app.model.AppRule
 import com.jiexian.app.service.GuardService
@@ -37,6 +38,8 @@ data class MainUiState(
     val guardianAlive: Boolean = true,
     val hasBackgroundAccess: Boolean = true,
     val hasOverlayAccess: Boolean = false,
+    /** Whether system-level suspension through Shizuku is available right now. */
+    val systemLock: ShizukuEnforcement.State = ShizukuEnforcement.State.UNAVAILABLE,
     val nowMillis: Long = System.currentTimeMillis(),
     val message: String? = null,
     val availableUpdate: ReleaseInfo? = null,
@@ -115,6 +118,7 @@ class MainViewModel(
                 guardianAlive = GuardianHeartbeat.isAlive(context),
                 hasBackgroundAccess = PermissionUtils.isIgnoringBatteryOptimizations(context),
                 hasOverlayAccess = PermissionUtils.canDrawOverlays(context),
+                systemLock = ShizukuEnforcement.state(),
                 nowMillis = System.currentTimeMillis(),
                 activeLocks = it.activeLocks.filter { lock -> lock.unlockAt > System.currentTimeMillis() },
             )
@@ -145,6 +149,7 @@ class MainViewModel(
             if (isEditing) repository.updateRule(rule) else repository.addRule(rule)
             // A rule saved during its disabled window starts that cycle immediately.
             snapshotter.snapshotAll()
+            runCatching { ShizukuEnforcement.sync(getApplication(), repository) }
             val lockActive =
                 repository
                     .activeLocksForRule(rule.id, System.currentTimeMillis())
@@ -169,6 +174,7 @@ class MainViewModel(
                     .activeLocksForRule(rule.id, System.currentTimeMillis())
                     .isNotEmpty()
             repository.deleteRule(rule)
+            runCatching { ShizukuEnforcement.sync(getApplication(), repository) }
             _state.update {
                 it.copy(
                     message =
@@ -179,6 +185,15 @@ class MainViewModel(
                         },
                 )
             }
+        }
+    }
+
+    /** Called after the user grants the Shizuku permission: enforce immediately. */
+    fun onSystemLockGranted() {
+        viewModelScope.launch {
+            val context = getApplication<Application>()
+            runCatching { ShizukuEnforcement.sync(context, repository) }
+            _state.update { it.copy(systemLock = ShizukuEnforcement.state()) }
         }
     }
 
