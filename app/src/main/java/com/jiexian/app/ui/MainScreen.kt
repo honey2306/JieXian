@@ -27,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessTime
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.BatterySaver
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Info
@@ -201,15 +202,25 @@ fun MainScreen(
 
             NightHero(
                 copy = copy,
-                hasAccess = state.hasUsageAccess && state.hasAccessibilityAccess,
+                hasAccess = state.hasUsageAccess && state.hasAccessibilityAccess && state.guardianAlive,
                 activeLocks = activeLocks,
             )
+
+            if (state.hasAccessibilityAccess && !state.guardianAlive) {
+                GuardianStoppedCard()
+            }
 
             state.availableUpdate?.let { update ->
                 UpdateCard(update = update, installing = state.installingUpdate, onInstall = onInstallUpdate)
             }
 
-            if (!state.hasUsageAccess || !state.hasAccessibilityAccess || !state.hasNotificationAccess) {
+            val guardianNeedsAttention = state.hasAccessibilityAccess && !state.guardianAlive
+            if (!state.hasUsageAccess ||
+                !state.hasAccessibilityAccess ||
+                !state.hasNotificationAccess ||
+                !state.hasBackgroundAccess ||
+                guardianNeedsAttention
+            ) {
                 PermissionCard(state)
             }
 
@@ -338,6 +349,34 @@ private fun NightHero(
 }
 
 @Composable
+private fun GuardianStoppedCard() {
+    val context = LocalContext.current
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = Color(0x1ADCE7CC),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x40DAE7CC)),
+    ) {
+        Row(Modifier.padding(horizontal = 17.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Security, contentDescription = null, tint = Moonlight, modifier = Modifier.size(21.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text("守护已停止", color = NightText, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    "系统清理或强制停止后，无障碍服务需要重新开启",
+                    color = NightMuted,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 3.dp),
+                )
+            }
+            TextButton(onClick = { context.startActivity(PermissionUtils.accessibilitySettingsIntent()) }) {
+                Text("重新开启", color = Moonlight)
+            }
+        }
+    }
+    Spacer(Modifier.height(14.dp))
+}
+
+@Composable
 private fun UpdateCard(
     update: ReleaseInfo,
     installing: Boolean,
@@ -353,7 +392,12 @@ private fun UpdateCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.SystemUpdate, contentDescription = null, tint = Moonlight, modifier = Modifier.size(22.dp))
                 Spacer(Modifier.width(10.dp))
-                Text("新版本 ${update.versionName}", color = NightText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                Text(
+                    "新版本 ${update.versionName}",
+                    color = NightText,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                )
             }
             Text(update.notes, color = NightMuted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
             Button(
@@ -364,7 +408,11 @@ private fun UpdateCard(
                 modifier = Modifier.fillMaxWidth().padding(top = 14.dp).height(44.dp),
             ) {
                 if (installing) {
-                    CircularProgressIndicator(modifier = Modifier.size(17.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(17.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp,
+                    )
                     Spacer(Modifier.width(8.dp))
                     Text("正在下载并校验")
                 } else {
@@ -378,6 +426,7 @@ private fun UpdateCard(
 @Composable
 private fun PermissionCard(state: MainUiState) {
     val context = LocalContext.current
+    var showBackgroundGuide by remember { mutableStateOf(false) }
     Surface(shape = RoundedCornerShape(22.dp), color = GlassSurface, border = androidx.compose.foundation.BorderStroke(1.dp, GlassBorder)) {
         Column(Modifier.padding(17.dp)) {
             Text("让守护真正开始", color = NightText, fontWeight = FontWeight.Medium)
@@ -401,13 +450,109 @@ private fun PermissionCard(state: MainUiState) {
             PermissionRow(
                 Icons.Outlined.Security,
                 "应用守护服务",
-                if (state.hasAccessibilityAccess) "服务运行中" else "识别并退出受限应用",
-                state.hasAccessibilityAccess,
+                when {
+                    state.hasAccessibilityAccess && state.guardianAlive -> "服务运行中"
+                    state.hasAccessibilityAccess -> "被系统停止了，点此重新开启"
+                    else -> "识别并退出受限应用"
+                },
+                state.hasAccessibilityAccess && state.guardianAlive,
             ) {
                 context.startActivity(PermissionUtils.accessibilitySettingsIntent())
             }
+            BackgroundRow(granted = state.hasBackgroundAccess) { showBackgroundGuide = true }
         }
     }
+    if (showBackgroundGuide) {
+        BackgroundGuideDialog(
+            context = context,
+            batteryExempt = state.hasBackgroundAccess,
+            onDismiss = { showBackgroundGuide = false },
+        )
+    }
+}
+
+@Composable
+private fun BackgroundRow(
+    granted: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .clickable(onClick = onClick)
+                .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Outlined.BatterySaver, null, tint = Moonlight, modifier = Modifier.size(21.dp))
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text("后台守护", color = NightText, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                if (granted) "已允许后台运行，退出多任务不会被清理" else "允许后台运行，避免被系统清理",
+                color = NightMuted,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Icon(
+            if (granted) Icons.Outlined.Check else Icons.Outlined.ChevronRight,
+            contentDescription = null,
+            tint = Moonlight,
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
+
+@Composable
+private fun BackgroundGuideDialog(
+    context: android.content.Context,
+    batteryExempt: Boolean,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("让守护留在后台") },
+        text = {
+            Column {
+                Text(
+                    "清除多任务后，界限仍会继续拦截。国产系统（小米、华为、OPPO、vivo 等）还需要允许自启动，并允许后台运行，才能避免被系统清理。",
+                )
+                Spacer(Modifier.height(10.dp))
+                Text("被清理后，打开界限会显示「守护已停止」，重新开启无障碍服务即可恢复。", color = NightMuted)
+                Row(Modifier.padding(top = 8.dp)) {
+                    TextButton(onClick = { openAutoStart(context) }) { Text("自启动设置") }
+                    TextButton(onClick = { openAppDetails(context) }) { Text("应用信息") }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                openBatteryOptimizations(context)
+                onDismiss()
+            }) { Text(if (batteryExempt) "后台运行已开启" else "忽略电池优化") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("关闭") } },
+    )
+}
+
+private fun openBatteryOptimizations(context: android.content.Context) {
+    if (PermissionUtils.isIgnoringBatteryOptimizations(context)) {
+        openAppDetails(context)
+        return
+    }
+    PermissionUtils.batteryOptimizationIntents(context).forEach { intent ->
+        if (runCatching { context.startActivity(intent); true }.getOrDefault(false)) return
+    }
+    openAppDetails(context)
+}
+
+private fun openAutoStart(context: android.content.Context) {
+    if (!PermissionUtils.openAutoStartSettings(context)) openAppDetails(context)
+}
+
+private fun openAppDetails(context: android.content.Context) {
+    runCatching { context.startActivity(PermissionUtils.appDetailsIntent(context)) }
 }
 
 @Composable
@@ -462,7 +607,11 @@ private fun RuleCard(
                 Surface(shape = CircleShape, color = Color(0x14DCE7CC)) {
                     Text(
                         if (unlockAt == null) {
-                            if (rule.type == RuleType.DAILY_LIMIT) "每日" else "每天"
+                            when (rule.type) {
+                                RuleType.DAILY_LIMIT -> "每日"
+                                RuleType.TIME_WINDOW -> "每天"
+                                RuleType.ALLOW_ONLY -> "仅允许"
+                            }
                         } else {
                             "${unlockTimeLabel(unlockAt)} 恢复"
                         },
@@ -487,7 +636,7 @@ private fun RuleCard(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            if (rule.type == RuleType.TIME_WINDOW) {
+            if (rule.usesWindow) {
                 Text(
                     rule.windowLabel(),
                     color = Moonlight,
@@ -496,7 +645,14 @@ private fun RuleCard(
                     modifier = Modifier.padding(top = 7.dp),
                 )
                 Text(
-                    if (rule.startMinute > rule.endMinute) "跨越午夜 · ${rule.targets.size} 个应用" else "每天重复 · ${rule.targets.size} 个应用",
+                    when {
+                        rule.type == RuleType.ALLOW_ONLY && rule.startMinute > rule.endMinute ->
+                            "跨越午夜 · 只允许 ${rule.targets.size} 个应用"
+                        rule.type == RuleType.ALLOW_ONLY ->
+                            "每天重复 · 只允许 ${rule.targets.size} 个应用"
+                        rule.startMinute > rule.endMinute -> "跨越午夜 · ${rule.targets.size} 个应用"
+                        else -> "每天重复 · ${rule.targets.size} 个应用"
+                    },
                     color = NightMuted,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier.padding(top = 7.dp),
@@ -591,7 +747,7 @@ private fun AboutDialog(onDismiss: () -> Unit) {
         title = { Text("关于界限") },
         text = {
             Text(
-                "每条规则可以命名并包含多个应用。每日额度按应用分别计算；规则可以修改或删除，但已开始的限制会保留原结束时间。\n\n所有规则和使用统计只保存在本机，不会读取屏幕内容。更新功能仅连接 GitHub 公开 Release，用于检查、下载和校验安装包，不上传个人数据。\n\n受 Android 系统限制，关闭无障碍服务、清除应用数据或卸载应用会停止守护。设备级不可绕过管控需要 Device Owner 管理模式。",
+                "每条规则可以命名并包含多个应用。每日额度按应用分别计算；禁用时段限制勾选的应用；允许清单则相反，时段内只保留勾选的应用，其余会回到桌面。规则可以修改或删除，但已开始的限制会保留原结束时间。\n\n所有规则和使用统计只保存在本机，不会读取屏幕内容。更新功能仅连接 GitHub 公开 Release，用于检查、下载和校验安装包，不上传个人数据。\n\n界限会用常驻通知保持后台运行，退出多任务后仍会拦截。受 Android 系统限制，强制停止、关闭无障碍服务、清除应用数据或卸载应用仍会停止守护；重新打开应用并在首页重新开启无障碍服务即可恢复。设备级不可绕过管控需要 Device Owner 管理模式。",
             )
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } },

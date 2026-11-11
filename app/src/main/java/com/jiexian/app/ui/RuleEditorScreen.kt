@@ -193,7 +193,11 @@ fun RuleEditorScreen(
                         modifier = Modifier.fillMaxWidth().height(52.dp),
                     ) { Text(if (existingRule == null) "创建界限" else "保存修改", fontWeight = FontWeight.SemiBold) }
                     Text(
-                        "开始之后，本次限制没有临时加时",
+                        if (ruleType == RuleType.ALLOW_ONLY) {
+                            "时段内只保留这些应用，其余应用会回到桌面"
+                        } else {
+                            "开始之后，本次限制没有临时加时"
+                        },
                         color = NightMuted,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 10.dp, bottom = 15.dp),
@@ -264,7 +268,10 @@ fun RuleEditorScreen(
                 )
 
                 Spacer(Modifier.height(18.dp))
-                EditorHeading("一起安静的应用", "${selectedTargets.size} 个")
+                EditorHeading(
+                    if (ruleType == RuleType.ALLOW_ONLY) "仍然可以使用的应用" else "一起安静的应用",
+                    "${selectedTargets.size} 个",
+                )
                 Spacer(Modifier.height(13.dp))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                     items(selectedTargets, key = { it.packageName }) { target ->
@@ -289,7 +296,7 @@ fun RuleEditorScreen(
                 }
                 if (selectedTargets.isEmpty()) {
                     Text(
-                        "选择几个容易分心的应用",
+                        if (ruleType == RuleType.ALLOW_ONLY) "选择此刻仍然可以使用的应用" else "选择几个容易分心的应用",
                         color = NightMuted,
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(top = 10.dp),
@@ -309,6 +316,7 @@ fun RuleEditorScreen(
                 ) {
                     TypeOption("每日限额", ruleType == RuleType.DAILY_LIMIT, Modifier.weight(1f)) { ruleType = RuleType.DAILY_LIMIT }
                     TypeOption("禁用时段", ruleType == RuleType.TIME_WINDOW, Modifier.weight(1f)) { ruleType = RuleType.TIME_WINDOW }
+                    TypeOption("允许清单", ruleType == RuleType.ALLOW_ONLY, Modifier.weight(1f)) { ruleType = RuleType.ALLOW_ONLY }
                 }
 
                 Spacer(Modifier.height(18.dp))
@@ -323,6 +331,7 @@ fun RuleEditorScreen(
                         TimeWindowEditor(
                             startMinute = startMinute,
                             endMinute = endMinute,
+                            allowOnly = ruleType == RuleType.ALLOW_ONLY,
                             onStartChange = { startMinute = it },
                             onEndChange = { endMinute = it },
                         )
@@ -493,6 +502,7 @@ private fun DailyLimitEditor(
 private fun TimeWindowEditor(
     startMinute: Int,
     endMinute: Int,
+    allowOnly: Boolean,
     onStartChange: (Int) -> Unit,
     onEndChange: (Int) -> Unit,
 ) {
@@ -505,7 +515,11 @@ private fun TimeWindowEditor(
         TimePickerDialog(context, { _, hour, minute -> onSelected(hour * 60 + minute) }, initial / 60, initial % 60, true).show()
     }
     Column(Modifier.padding(horizontal = 22.dp, vertical = 23.dp)) {
-        Text("每天的安静时刻", color = NightMuted, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            if (allowOnly) "每天只留下这些应用的时刻" else "每天的安静时刻",
+            color = NightMuted,
+            style = MaterialTheme.typography.bodyMedium,
+        )
         Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
             TimeField("开始", startMinute, Modifier.weight(1f)) { pickTime(startMinute, onStartChange) }
             TimeField("结束", endMinute, Modifier.weight(1f)) { pickTime(endMinute, onEndChange) }
@@ -525,6 +539,7 @@ private fun TimeWindowEditor(
             when {
                 startMinute == endMinute -> "开始和结束时间不能相同"
                 startMinute > endMinute -> "跨越午夜 · 次日 ${minuteLabel(endMinute)} 自动恢复"
+                allowOnly -> "每天重复 · ${minuteLabel(endMinute)} 起恢复全部应用"
                 else -> "每天重复 · ${minuteLabel(endMinute)} 自动恢复"
             },
             color = if (startMinute == endMinute) MaterialTheme.colorScheme.error else NightMuted,

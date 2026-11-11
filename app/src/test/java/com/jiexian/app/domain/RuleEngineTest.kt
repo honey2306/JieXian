@@ -34,6 +34,16 @@ class RuleEngineTest {
             endMinute = 9 * 60,
         )
 
+    private val allowOnlyRule =
+        AppRule(
+            id = "allow",
+            name = "专注",
+            targets = listOf(firstTarget),
+            type = RuleType.ALLOW_ONLY,
+            startMinute = 23 * 60,
+            endMinute = 9 * 60,
+        )
+
     private fun at(
         day: Int,
         hour: Int,
@@ -91,6 +101,27 @@ class RuleEngineTest {
         val stricter = dailyRule.copy(id = "strict", limitMinutes = 10)
         val remaining = RuleEngine.remainingQuotaMillis(listOf(dailyRule, stricter), firstTarget.packageName, 6 * 60_000L)
         assertEquals(4 * 60_000L, remaining)
+    }
+
+    @Test
+    fun `allow list locks every other app and keeps listed apps usable`() {
+        val blocked = RuleEngine.triggeredLocks(listOf(allowOnlyRule), secondTarget.packageName, at(1, 23, 30), 0).single()
+        assertEquals(secondTarget.packageName, blocked.packageName)
+        assertEquals(RuleType.ALLOW_ONLY, blocked.type)
+        assertEquals(at(2, 9).toInstant().toEpochMilli(), blocked.unlockAt)
+        assertTrue(RuleEngine.triggeredLocks(listOf(allowOnlyRule), firstTarget.packageName, at(1, 23, 30), 0).isEmpty())
+    }
+
+    @Test
+    fun `allow list is inactive outside its window`() {
+        assertTrue(RuleEngine.triggeredLocks(listOf(allowOnlyRule), secondTarget.packageName, at(1, 15), 0).isEmpty())
+    }
+
+    @Test
+    fun `allow list and block list can coexist for different apps`() {
+        val locks = RuleEngine.triggeredLocks(listOf(overnightRule, allowOnlyRule), "third.app", at(1, 23, 30), 0)
+        // The block-list rule never matches an unlisted app; only the allow list locks it.
+        assertEquals(1, locks.count { it.type == RuleType.ALLOW_ONLY })
     }
 
     @Test

@@ -165,7 +165,11 @@ private fun BlockedScreen(
             Text("界限", color = NightText, fontSize = 20.sp, fontWeight = FontWeight.Medium, letterSpacing = 1.sp)
             Spacer(Modifier.weight(1f))
             Text(
-                if (lock.type == RuleType.DAILY_LIMIT) "今日额度" else "禁用时段",
+                when (lock.type) {
+                    RuleType.DAILY_LIMIT -> "今日额度"
+                    RuleType.TIME_WINDOW -> "禁用时段"
+                    RuleType.ALLOW_ONLY -> "允许清单"
+                },
                 color = NightMuted,
                 style = MaterialTheme.typography.labelMedium,
             )
@@ -192,7 +196,11 @@ private fun BlockedScreen(
         }
 
         Text(
-            if (lock.type == RuleType.DAILY_LIMIT) "今天，先到这里" else "此刻，留一点安静",
+            when (lock.type) {
+                RuleType.DAILY_LIMIT -> "今天，先到这里"
+                RuleType.TIME_WINDOW -> "此刻，留一点安静"
+                RuleType.ALLOW_ONLY -> "此刻，先放一放"
+            },
             color = NightText,
             fontFamily = FontFamily.Serif,
             fontSize = 31.sp,
@@ -201,7 +209,7 @@ private fun BlockedScreen(
             modifier = Modifier.padding(top = 22.dp),
         )
         Text(
-            "${lock.appName} 已进入本次限制",
+            if (lock.type == RuleType.ALLOW_ONLY) "${lock.appName} 不在允许清单内" else "${lock.appName} 已进入本次限制",
             color = NightMuted,
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.padding(top = 8.dp),

@@ -62,7 +62,12 @@ jobs:
           release = {
               'versionCode': int(code),
               'versionName': name,
-              'notes': f'界限 {name}：最新功能与稳定性改进。',
+              'notes': (
+                  f'界限 {name}：新增「允许清单」反向规则；'
+                  '守护改为前台常驻，清掉多任务后仍会拦截；'
+                  '被系统停止时首页与常驻通知会提示重新开启，'
+                  '并新增后台运行与厂商自启动引导。'
+              ),
               'apkUrl': (
                   'https://github.com/honey2306/JieXian/releases/'
                   f'download/{tag}/{output.name}'

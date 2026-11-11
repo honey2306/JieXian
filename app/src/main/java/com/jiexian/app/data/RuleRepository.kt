@@ -3,6 +3,7 @@ package com.jiexian.app.data
 import android.content.Context
 import com.jiexian.app.model.ActiveLock
 import com.jiexian.app.model.AppRule
+import com.jiexian.app.model.RuleType
 import kotlinx.coroutines.flow.Flow
 
 class RuleRepository private constructor(
@@ -23,6 +24,8 @@ class RuleRepository private constructor(
     suspend fun allRules(): List<AppRule> = dao.allRules()
 
     suspend fun rulesForPackage(packageName: String): List<AppRule> = dao.allRules().filter { it.containsPackage(packageName) }
+
+    suspend fun allowOnlyRules(): List<AppRule> = dao.allRules().filter { it.type == RuleType.ALLOW_ONLY }
 
     suspend fun activeLocksForPackage(
         packageName: String,

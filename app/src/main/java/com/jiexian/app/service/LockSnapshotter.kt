@@ -16,6 +16,9 @@ class LockSnapshotter(
         val groups =
             repository
                 .allRules()
+                // Allow-only rules have no fixed list of victims: a lock is created on demand
+                // for whichever app reaches the foreground. Their targets are the allowed apps.
+                .filter { it.type != RuleType.ALLOW_ONLY }
                 .flatMap { rule -> rule.targets.map { target -> target.packageName to rule } }
                 .groupBy(keySelector = { it.first }, valueTransform = { it.second })
         snapshotRuleGroups(groups, now)
@@ -23,10 +26,14 @@ class LockSnapshotter(
 
     suspend fun snapshotPackage(
         packageName: String,
+        allowOnlyRules: List<AppRule> = emptyList(),
         now: ZonedDateTime = ZonedDateTime.now(),
     ) {
         repository.deleteExpiredLocks(now.toInstant().toEpochMilli())
-        snapshotRuleGroups(mapOf(packageName to repository.rulesForPackage(packageName)), now)
+        val rules =
+            (repository.rulesForPackage(packageName) + allowOnlyRules)
+                .distinctBy(AppRule::id)
+        snapshotRuleGroups(mapOf(packageName to rules), now)
     }
 
     private suspend fun snapshotRuleGroups(

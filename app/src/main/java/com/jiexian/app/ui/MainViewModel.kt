@@ -9,6 +9,8 @@ import com.jiexian.app.data.RuleRepository
 import com.jiexian.app.data.UsageRepository
 import com.jiexian.app.model.ActiveLock
 import com.jiexian.app.model.AppRule
+import com.jiexian.app.service.GuardService
+import com.jiexian.app.service.GuardianHeartbeat
 import com.jiexian.app.service.LockSnapshotter
 import com.jiexian.app.service.ReminderScheduler
 import com.jiexian.app.update.ReleaseInfo
@@ -31,6 +33,8 @@ data class MainUiState(
     val hasUsageAccess: Boolean = false,
     val hasAccessibilityAccess: Boolean = false,
     val hasNotificationAccess: Boolean = false,
+    val guardianAlive: Boolean = true,
+    val hasBackgroundAccess: Boolean = true,
     val nowMillis: Long = System.currentTimeMillis(),
     val message: String? = null,
     val availableUpdate: ReleaseInfo? = null,
@@ -78,11 +82,14 @@ class MainViewModel(
                 hasUsageAccess = usageRepository.hasUsageAccess(),
                 hasAccessibilityAccess = PermissionUtils.isAccessibilityEnabled(context),
                 hasNotificationAccess = PermissionUtils.hasNotificationAccess(context),
+                guardianAlive = GuardianHeartbeat.isAlive(context),
+                hasBackgroundAccess = PermissionUtils.isIgnoringBatteryOptimizations(context),
                 nowMillis = System.currentTimeMillis(),
                 activeLocks = it.activeLocks.filter { lock -> lock.unlockAt > System.currentTimeMillis() },
             )
         }
         refreshUsage()
+        GuardService.sync(context)
         viewModelScope.launch { runCatching { reminderScheduler.check() } }
         viewModelScope.launch {
             runCatching { updateChecker.check() }

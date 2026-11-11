@@ -7,6 +7,9 @@ import java.util.UUID
 enum class RuleType {
     DAILY_LIMIT,
     TIME_WINDOW,
+
+    /** Inverse of [TIME_WINDOW]: only [AppRule.targets] stay usable, everything else is locked. */
+    ALLOW_ONLY,
 }
 
 data class AppTarget(
@@ -27,7 +30,7 @@ data class AppRule(
     val type: RuleType,
     /** Daily quota per target app in minutes. Only used by DAILY_LIMIT. */
     val limitMinutes: Int = 60,
-    /** Inclusive start, minutes after midnight. Only used by TIME_WINDOW. */
+    /** Inclusive start, minutes after midnight. Only used by window rules. */
     val startMinute: Int = 23 * 60,
     /** Exclusive end, minutes after midnight. Overnight windows are supported. */
     val endMinute: Int = 9 * 60,
@@ -40,13 +43,16 @@ data class AppRule(
         require(limitMinutes in 5..720)
         require(startMinute in 0..1439)
         require(endMinute in 0..1439)
-        if (type == RuleType.TIME_WINDOW) require(startMinute != endMinute)
+        if (usesWindow) require(startMinute != endMinute)
     }
+
+    /** Daily quota rules are the only kind that are not bound to a clock window. */
+    val usesWindow: Boolean get() = type != RuleType.DAILY_LIMIT
 
     fun containsPackage(packageName: String): Boolean = targets.any { it.packageName == packageName }
 
     fun isInWindow(minuteOfDay: Int): Boolean {
-        if (type != RuleType.TIME_WINDOW) return false
+        if (!usesWindow) return false
         return if (startMinute < endMinute) {
             minuteOfDay >= startMinute && minuteOfDay < endMinute
         } else {

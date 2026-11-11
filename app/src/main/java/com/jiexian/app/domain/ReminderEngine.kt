@@ -53,7 +53,7 @@ object ReminderEngine {
                     }
                 }
 
-            rules.filter { it.type == RuleType.TIME_WINDOW }.forEach { rule ->
+            rules.filter { it.usesWindow }.forEach { rule ->
                 val todayStart =
                     now
                         .toLocalDate()
@@ -71,7 +71,11 @@ object ReminderEngine {
                             key = key,
                             kind = ReminderKind.WINDOW,
                             title = "「${rule.name}」将在 5 分钟后开始",
-                            text = "$appNames · ${minuteLabel(rule.startMinute)} 起进入禁用时段。",
+                            text = if (rule.type == RuleType.ALLOW_ONLY) {
+                                "只有 $appNames 可以继续使用。"
+                            } else {
+                                "$appNames · ${minuteLabel(rule.startMinute)} 起进入禁用时段。"
+                            },
                         ),
                     )
                 }
